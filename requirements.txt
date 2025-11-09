@@ -2,3 +2,4 @@ yt_dlp
 faster_whisper
 openai
 python-dotenv
+requests
