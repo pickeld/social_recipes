@@ -1,30 +1,32 @@
-import yt_dlp
+import json
 import os
-import subprocess
-from dataclasses import dataclass
-from typing import List, Optional
-from faster_whisper import WhisperModel
-
-from openai_recipie import Chef
+from chef import Chef
+from mealie import Mealie
 from tiktok import Tiktok
 from transcriber import Transcriber
 
 
 def main(video_url: str):
-
     tiktok = Tiktok(video_url)
     info = tiktok._get_info()
     description = info.get("description", "No description available.")
     title = info.get("title", "Untitled")
 
-    video_path = tiktok._download_video()
-    transcriber = Transcriber(video_path)
-    transcription_result = transcriber.transcribe()
+    vid_id, video_path = tiktok._download_video()
+    if os.path.exists(f"tmp/{vid_id}.txt"):
+        print("Using cached transcription.")
+        with open(f"tmp/{vid_id}.txt", "r") as f:
+            transcription = f.read()
+    else:
+        transcriber = Transcriber(video_path)
+        transcription = transcriber.transcribe()
+        with open(f"tmp/{vid_id}.txt", "w") as f:
+            f.write(transcription)
     return {
         "title": title,
         "description": description,
         "video_path": video_path,
-        "transcription": transcription_result
+        "transcription": transcription
     }
 
 
@@ -33,4 +35,9 @@ if __name__ == "__main__":
     results = main(tiktok_url)
     chef = Chef(description=results["description"],
                 transcription=results["transcription"])
-    chef.create_recipe()
+
+    results = chef.create_recipe()
+    if results:
+        mealie = Mealie()
+        mealie_recipe = mealie.create_recipe(results)
+    print(results)
