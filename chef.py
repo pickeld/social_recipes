@@ -6,74 +6,75 @@ from config import config
 from helpers import RECIPE_SYSTEM_PROMPT, YIELD_NUTRITION_PROMPT
 
 
+def _normalize_space(s: str) -> str:
+    return " ".join(str(s or "").split()).strip()
+
+
 class Chef:
-    def __init__(self, description: str, transcription: str, *, model: str | None = None):
+    def __init__(self, source_url: str, description: str, transcription: str, *, model: str | None = None):
         self.client = OpenAI(api_key=config.OPENAI_API_KEY)
         self.model = model or config.OPENAI_MODEL
+        self.source_url = source_url
         self.description = description
         self.transcription = transcription
 
+    def _clean_mealie_and_schema_lists(self, data: dict) -> None:
+        # Clean recipeIngredients (objects)
+        cleaned, seen = [], set()
+        for it in data.get("recipeIngredients") or []:
+            food = _normalize_space(it.get("food", ""))
+            quantity = _normalize_space(it.get("quantity", ""))
+            unit = _normalize_space(it.get("unit", ""))
+            note = _normalize_space(it.get("note", ""))
+
+            key = (food.casefold(), quantity, unit, note.casefold())
+            if not food:
+                continue
+            if key in seen:
+                continue
+            seen.add(key)
+
+            cleaned.append({
+                "food": food,
+                "quantity": quantity,
+                "unit": unit,
+                "note": note,
+            })
+
+        data["recipeIngredients"] = cleaned
+
+        # Derive Schema.org recipeIngredient (strings) from the objects
+        lines = []
+        for it in cleaned:
+            parts = [it["quantity"], it["unit"], it["food"], it["note"]]
+            line = _normalize_space(" ".join(p for p in parts if p))
+            if line:
+                lines.append(line)
+        data["recipeIngredient"] = lines
+
     # ----------------- Recipe generation -----------------
+
     def _postprocess_recipe(self, data: dict, source_url: str | None) -> dict:
+        """
+        Normalizes and enriches raw model output into a valid Schema.org Recipe.
+        Additionally parses quantities/units for structured ingredients when missing.
+        """
         # Context & type
         data.setdefault("@context", "https://schema.org")
         data.setdefault("@type", "Recipe")
+        data.setdefault("url", self.source_url)
+        data.setdefault(
+            "video", {"@type": "VideoObject", "url": self.source_url})
 
-        # datePublished → ISO 8601 מלא
         dp = data.get("datePublished")
         if not isinstance(dp, str) or len(dp) <= 10:
             data["datePublished"] = datetime.now(
                 timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-        # video/url אם יש מקור
-        if source_url:
-            data.setdefault("url", source_url)
-            data.setdefault(
-                "video", {"@type": "VideoObject", "url": source_url})
-
-        # מצרכים: רשימה ייחודית
-        ingredients = data.get("recipeIngredient", [])
-        if isinstance(ingredients, str):
-            ingredients = [i.strip()
-                           for i in ingredients.split("\n") if i.strip()]
-        seen = set()
-        dedup = []
-        for ing in ingredients or []:
-            if ing and ing not in seen:
-                seen.add(ing)
-                dedup.append(ing)
-        data["recipeIngredient"] = dedup
-
-        # הוראות: עטיפה ל-HowToStep
-        instr = data.get("recipeInstructions", [])
-        if isinstance(instr, str):
-            steps = [s.strip() for s in instr.split("\n") if s.strip()]
-            instr = [{"@type": "HowToStep", "text": s} for s in steps]
-        else:
-            wrapped = []
-            for s in instr or []:
-                if isinstance(s, str):
-                    txt = s.strip()
-                    if txt:
-                        wrapped.append({"@type": "HowToStep", "text": txt})
-                elif isinstance(s, dict):
-                    s.setdefault("@type", "HowToStep")
-                    if s.get("text"):
-                        s["text"] = s["text"].strip()
-                        wrapped.append(s)
-            instr = wrapped
-        data["recipeInstructions"] = instr
-
-        # recipeYield: הסר אם לא ידוע
-        if str(data.get("recipeYield", "")).strip() in ("", "לא צויין", "לא צוין"):
-            data.pop("recipeYield", None)
-
+        self._clean_mealie_and_schema_lists(data)
         return data
 
     def create_recipe(self, *, source_url: str | None = None) -> dict:
-        """
-        שולח description+transcription ל-OpenAI ומחזיר JSON-LD תקין (Schema.org/Recipe).
-        """
         payload = {
             "source_url": source_url,
             "description": self.description,
@@ -95,10 +96,6 @@ class Chef:
         return recipe
 
     def _enrich_yield_and_nutrition(self, recipe: dict) -> dict:
-        """
-        אם חסרים recipeYield או nutrition – נאמד אותם בעזרת AI.
-        nutrition יהיה פר-מנה, כמצופה ב-Schema.org.
-        """
         need_yield = "recipeYield" not in recipe
         need_nutrition = "nutrition" not in recipe
 
