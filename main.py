@@ -31,13 +31,13 @@ def main(video_url: str):
 
 
 if __name__ == "__main__":
-    tiktok_url = "https://www.tiktok.com/@kobiedri/video/7558063455425678599"
-    results = main(tiktok_url)
-    chef = Chef(description=results["description"],
+    url = "https://www.tiktok.com/@kobiedri/video/7558063455425678599"
+    results = main(url)
+    chef = Chef(source_url=url, description=results["description"],
                 transcription=results["transcription"])
 
     results = chef.create_recipe()
-    if results:
-        mealie = Mealie()
-        mealie_recipe = mealie.create_recipe(results)
+    # if results:
+    #     mealie = Mealie()
+    #     mealie_recipe = mealie.create_recipe(results)
     print(results)
