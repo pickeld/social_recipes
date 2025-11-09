@@ -9,7 +9,7 @@ class Tiktok:
 
     def _get_info(self):
         """Fetch metadata (description, title, etc.) without downloading the video."""
-        ydl_opts = {"quiet": True, "skip_download": True}
+        ydl_opts: yt_dlp._Params = {"quiet": True, "skip_download": True}
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(self.url, download=False)
         self.video_id = info.get("id")
@@ -29,4 +29,4 @@ class Tiktok:
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([self.url])
-        return video_path
+        return self.video_id, video_path
