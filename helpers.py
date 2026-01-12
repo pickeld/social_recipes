@@ -87,5 +87,3 @@ All nutrition values are per serving.
 Do not invent impossible numbers; keep them plausible.
 Output recipeYield in {target_lang}.
 """
-
-
