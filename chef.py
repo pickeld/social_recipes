@@ -23,11 +23,10 @@ class Chef:
             self.client = OpenAI(api_key=config.OPENAI_API_KEY)
             self.model = model or config.OPENAI_MODEL
         elif self.provider == "gemini":
-            import google.generativeai as genai
+            from google import genai
             logger.info("Using Gemini LLM provider")
-            genai.configure(api_key=config.GEMINI_API_KEY)
+            self.client = genai.Client(api_key=config.GEMINI_API_KEY)
             self.model = model or config.GEMINI_MODEL
-            self.client = genai.GenerativeModel(self.model)
         else:
             raise ValueError(f"Unknown LLM provider: {self.provider}")
         self.source_url = source_url
@@ -46,9 +45,10 @@ class Chef:
             )
             return resp.output_text
         elif self.provider == "gemini":
-            # Gemini combines system prompt with user content
-            full_prompt = f"{system_prompt}\n\n{user_content}"
-            resp = self.client.generate_content(full_prompt)
+            resp = self.client.models.generate_content(
+                model=self.model,
+                contents=f"{system_prompt}\n\n{user_content}"
+            )
             return resp.text
         else:
             raise ValueError(f"Unknown LLM provider: {self.provider}")
