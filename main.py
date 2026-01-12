@@ -8,9 +8,9 @@ from transcriber import Transcriber
 
 def main(video_url: str):
     tiktok = Tiktok(video_url)
-    info = tiktok._get_info()
-    description = info.get("description", "No description available.")
-    title = info.get("title", "Untitled")
+    item = tiktok._get_info()
+    description = item.get("description", "No description available.")
+    title = item.get("title", "Untitled")
 
     vid_id, video_path = tiktok._download_video()
     if os.path.exists(f"tmp/{vid_id}.txt"):
@@ -31,7 +31,7 @@ def main(video_url: str):
 
 
 if __name__ == "__main__":
-    url = "https://www.tiktok.com/@kobiedri/video/7558063455425678599"
+    url = "https://www.tiktok.com/@recipeincaption/video/7532985862854921477"
     results = main(url)
     chef = Chef(source_url=url, description=results["description"],
                 transcription=results["transcription"])
