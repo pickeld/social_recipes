@@ -13,6 +13,7 @@ class Config:
     RECIPE_LANG: str = os.getenv("RECIPE_LANG", "hebrew")
     MEALIE_API_KEY: str = os.getenv("MEALIE_API_KEY", "")
     MEALIE_HOST: str = os.getenv("MEALIE_HOST", "http://192.168.127.251:9925")
+    TARGET_LANGUAGE: str = os.getenv("TARGET_LANGUAGE", "he")
 
 
 config = Config()
