@@ -1,7 +1,53 @@
 from config import config
-import requests
 import re
 import os
+import sys
+
+# Use requests.Session for connection reuse and better eventlet compatibility
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+# Increase recursion limit to handle eventlet + SSL edge cases
+# This is needed because eventlet's monkey-patching can cause deep call stacks
+# when combined with requests/urllib3's SSL handling
+_original_limit = sys.getrecursionlimit()
+if _original_limit < 2000:
+    sys.setrecursionlimit(2000)
+
+
+def _create_session() -> requests.Session:
+    """Create a requests session with retry logic and proper timeouts."""
+    session = requests.Session()
+    retry_strategy = Retry(
+        total=3,
+        backoff_factor=0.5,
+        status_forcelist=[500, 502, 503, 504],
+    )
+    adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=1, pool_maxsize=1)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
+
+
+def _safe_request(method: str, url: str, session: requests.Session, **kwargs) -> requests.Response:
+    """
+    Execute HTTP request with eventlet compatibility.
+    Uses tpool if running under eventlet to avoid recursion issues with SSL.
+    """
+    try:
+        # Check if eventlet is active (has monkey-patched the socket module)
+        import eventlet
+        from eventlet import tpool
+        # Run the request in a native thread to avoid eventlet SSL recursion issues
+        return tpool.execute(getattr(session, method), url, **kwargs)
+    except ImportError:
+        # eventlet not available, use regular request
+        return getattr(session, method)(url, **kwargs)
+    except Exception as e:
+        # If tpool fails for any reason, fall back to regular request
+        # but with increased recursion limit already set above
+        return getattr(session, method)(url, **kwargs)
 
 
 class Tandoor:
@@ -16,6 +62,8 @@ class Tandoor:
         # Caches to avoid repeated API calls for same units/foods
         self._unit_cache = {}  # name.lower() -> id
         self._food_cache = {}  # name.lower() -> id
+        # Use a session for connection reuse (better eventlet compatibility)
+        self._session = _create_session()
 
     def _parse_iso_duration(self, duration: str) -> int:
         """
@@ -71,8 +119,10 @@ class Tandoor:
         """
         # Preload units (usually a small list)
         try:
-            resp = requests.get(
+            resp = _safe_request(
+                "get",
                 f"{self.base_url}/api/unit/",
+                self._session,
                 headers=headers,
                 params={"page_size": 500},
                 timeout=15
@@ -91,8 +141,10 @@ class Tandoor:
 
         # Preload foods (could be a larger list)
         try:
-            resp = requests.get(
+            resp = _safe_request(
+                "get",
                 f"{self.base_url}/api/food/",
+                self._session,
                 headers=headers,
                 params={"page_size": 500},
                 timeout=15
@@ -123,8 +175,9 @@ class Tandoor:
         # Search for existing unit
         search_url = f"{self.base_url}/api/unit/"
         try:
-            resp = requests.get(
-                search_url, headers=headers, params={"query": unit_name}, timeout=10
+            resp = _safe_request(
+                "get", search_url, self._session,
+                headers=headers, params={"query": unit_name}, timeout=10
             )
             if resp.status_code == 200:
                 units = resp.json()
@@ -141,8 +194,9 @@ class Tandoor:
         # Create new unit
         create_url = f"{self.base_url}/api/unit/"
         try:
-            resp = requests.post(
-                create_url, json={"name": unit_name}, headers=headers, timeout=10
+            resp = _safe_request(
+                "post", create_url, self._session,
+                json={"name": unit_name}, headers=headers, timeout=10
             )
             if resp.status_code in (200, 201):
                 created = resp.json()
@@ -168,8 +222,9 @@ class Tandoor:
         # Search for existing food
         search_url = f"{self.base_url}/api/food/"
         try:
-            resp = requests.get(
-                search_url, headers=headers, params={"query": food_name}, timeout=10
+            resp = _safe_request(
+                "get", search_url, self._session,
+                headers=headers, params={"query": food_name}, timeout=10
             )
             if resp.status_code == 200:
                 foods = resp.json()
@@ -186,8 +241,9 @@ class Tandoor:
         # Create new food
         create_url = f"{self.base_url}/api/food/"
         try:
-            resp = requests.post(
-                create_url, json={"name": food_name}, headers=headers, timeout=10
+            resp = _safe_request(
+                "post", create_url, self._session,
+                json={"name": food_name}, headers=headers, timeout=10
             )
             if resp.status_code in (200, 201):
                 created = resp.json()
@@ -420,7 +476,7 @@ class Tandoor:
         print(f"[Tandoor] Creating recipe: {payload.get('name')}")
         print(f"[Tandoor] POST {create_url}")
 
-        resp = requests.post(create_url, json=payload, headers=headers)
+        resp = _safe_request("post", create_url, self._session, json=payload, headers=headers, timeout=30)
         print(f"[Tandoor] Response status: {resp.status_code}")
 
         if resp.status_code >= 400:
@@ -470,7 +526,7 @@ class Tandoor:
             with open(image_path, "rb") as f:
                 files = {"image": (os.path.basename(
                     image_path), f, content_type)}
-                resp = requests.put(url, files=files, headers=headers)
+                resp = _safe_request("put", url, self._session, files=files, headers=headers, timeout=60)
 
             print(f"[Tandoor] Image upload status: {resp.status_code}")
 
