@@ -149,22 +149,35 @@ class Chef:
 
         return data
 
-    def create_recipe(self, *, source_url: str | None = None) -> dict:
+    def create_recipe(self, *, source_url: str | None = None, max_retries: int = 3) -> dict:
         payload = {
             "source_url": source_url,
             "description": self.description,
             "transcript": self.transcription,
         }
 
-        response_text = self._call_llm(
-            get_recipe_system_prompt(),
-            json.dumps(payload, ensure_ascii=False)
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                response_text = self._call_llm(
+                    get_recipe_system_prompt(),
+                    json.dumps(payload, ensure_ascii=False)
+                )
+                data = json.loads(response_text)
+                recipe = self._postprocess_recipe(data, source_url)
+                recipe = self._enrich_yield_and_nutrition(recipe)
+                return recipe
+            except json.JSONDecodeError as e:
+                last_error = e
+                logger.warning(f"JSON parsing failed (attempt {attempt + 1}/{max_retries}): {e}")
+                logger.debug(f"Raw response: {response_text[:500]}...")
+                if attempt < max_retries - 1:
+                    continue
+        
+        raise RuntimeError(
+            f"Failed to parse LLM response as JSON after {max_retries} attempts. "
+            f"Last error: {last_error}"
         )
-
-        data = json.loads(response_text)
-        recipe = self._postprocess_recipe(data, source_url)
-        recipe = self._enrich_yield_and_nutrition(recipe)
-        return recipe
 
     def _enrich_yield_and_nutrition(self, recipe: dict) -> dict:
         need_yield = "recipeYield" not in recipe
