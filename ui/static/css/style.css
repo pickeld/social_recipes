@@ -309,6 +309,29 @@ main.with-sidebar {
     color: var(--text-muted);
 }
 
+/* Remember Me Checkbox in Login */
+.remember-me {
+    margin-bottom: 1.5rem;
+}
+
+.remember-me .checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    cursor: pointer;
+    font-weight: 400;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.remember-me .checkbox-label input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--primary-color);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
 /* ===== Main Page ===== */
 .main-container {
     max-width: 900px;

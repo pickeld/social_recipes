@@ -13,6 +13,9 @@ class Tandoor:
     def __init__(self):
         self.api_key = config.TANDOOR_API_KEY
         self.base_url = config.TANDOOR_HOST.rstrip("/")
+        # Caches to avoid repeated API calls for same units/foods
+        self._unit_cache = {}  # name.lower() -> id
+        self._food_cache = {}  # name.lower() -> id
 
     def _parse_iso_duration(self, duration: str) -> int:
         """
@@ -61,24 +64,77 @@ class Tandoor:
                 pass
         return 1
 
+    def _preload_caches(self, headers: dict) -> None:
+        """
+        Preload unit and food caches with existing items from Tandoor.
+        This reduces API calls by fetching all items at once.
+        """
+        # Preload units (usually a small list)
+        try:
+            resp = requests.get(
+                f"{self.base_url}/api/unit/",
+                headers=headers,
+                params={"page_size": 500},
+                timeout=15
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                units = data.get("results", []) if isinstance(
+                    data, dict) else data
+                for u in units:
+                    if isinstance(u, dict) and u.get("name") and u.get("id"):
+                        self._unit_cache[u["name"].lower()] = u["id"]
+                print(
+                    f"[Tandoor] Preloaded {len(self._unit_cache)} units into cache")
+        except Exception as e:
+            print(f"[Tandoor] Failed to preload units: {e}")
+
+        # Preload foods (could be a larger list)
+        try:
+            resp = requests.get(
+                f"{self.base_url}/api/food/",
+                headers=headers,
+                params={"page_size": 500},
+                timeout=15
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                foods = data.get("results", []) if isinstance(
+                    data, dict) else data
+                for f in foods:
+                    if isinstance(f, dict) and f.get("name") and f.get("id"):
+                        self._food_cache[f["name"].lower()] = f["id"]
+                print(
+                    f"[Tandoor] Preloaded {len(self._food_cache)} foods into cache")
+        except Exception as e:
+            print(f"[Tandoor] Failed to preload foods: {e}")
+
     def _get_or_create_unit(self, unit_name: str, headers: dict) -> int | None:
-        """Get existing unit ID or create new one. Returns unit ID or None."""
+        """Get existing unit ID or create new one. Returns unit ID or None. Uses cache."""
         if not unit_name:
             return None
+
+        cache_key = unit_name.lower()
+
+        # Check cache first
+        if cache_key in self._unit_cache:
+            return self._unit_cache[cache_key]
 
         # Search for existing unit
         search_url = f"{self.base_url}/api/unit/"
         try:
             resp = requests.get(
-                search_url, headers=headers, params={"query": unit_name}
+                search_url, headers=headers, params={"query": unit_name}, timeout=10
             )
             if resp.status_code == 200:
                 units = resp.json()
                 if isinstance(units, dict) and "results" in units:
                     units = units["results"]
                 for u in units:
-                    if isinstance(u, dict) and u.get("name", "").lower() == unit_name.lower():
-                        return u.get("id")
+                    if isinstance(u, dict) and u.get("name", "").lower() == cache_key:
+                        unit_id = u.get("id")
+                        self._unit_cache[cache_key] = unit_id
+                        return unit_id
         except Exception as e:
             print(f"[Tandoor] Unit search error: {e}")
 
@@ -86,34 +142,44 @@ class Tandoor:
         create_url = f"{self.base_url}/api/unit/"
         try:
             resp = requests.post(
-                create_url, json={"name": unit_name}, headers=headers
+                create_url, json={"name": unit_name}, headers=headers, timeout=10
             )
             if resp.status_code in (200, 201):
                 created = resp.json()
-                return created.get("id")
+                unit_id = created.get("id")
+                self._unit_cache[cache_key] = unit_id
+                return unit_id
         except Exception as e:
             print(f"[Tandoor] Unit create error: {e}")
 
         return None
 
     def _get_or_create_food(self, food_name: str, headers: dict) -> int | None:
-        """Get existing food ID or create new one. Returns food ID or None."""
+        """Get existing food ID or create new one. Returns food ID or None. Uses cache."""
         if not food_name:
             return None
+
+        cache_key = food_name.lower()
+
+        # Check cache first
+        if cache_key in self._food_cache:
+            return self._food_cache[cache_key]
 
         # Search for existing food
         search_url = f"{self.base_url}/api/food/"
         try:
             resp = requests.get(
-                search_url, headers=headers, params={"query": food_name}
+                search_url, headers=headers, params={"query": food_name}, timeout=10
             )
             if resp.status_code == 200:
                 foods = resp.json()
                 if isinstance(foods, dict) and "results" in foods:
                     foods = foods["results"]
                 for f in foods:
-                    if isinstance(f, dict) and f.get("name", "").lower() == food_name.lower():
-                        return f.get("id")
+                    if isinstance(f, dict) and f.get("name", "").lower() == cache_key:
+                        food_id = f.get("id")
+                        self._food_cache[cache_key] = food_id
+                        return food_id
         except Exception as e:
             print(f"[Tandoor] Food search error: {e}")
 
@@ -121,11 +187,13 @@ class Tandoor:
         create_url = f"{self.base_url}/api/food/"
         try:
             resp = requests.post(
-                create_url, json={"name": food_name}, headers=headers
+                create_url, json={"name": food_name}, headers=headers, timeout=10
             )
             if resp.status_code in (200, 201):
                 created = resp.json()
-                return created.get("id")
+                food_id = created.get("id")
+                self._food_cache[cache_key] = food_id
+                return food_id
         except Exception as e:
             print(f"[Tandoor] Food create error: {e}")
 
@@ -154,7 +222,8 @@ class Tandoor:
                 food_name = (item.get("food") or "").strip()
                 modifiers = item.get("modifiers") or []
                 if isinstance(modifiers, str):
-                    modifiers = [m.strip() for m in modifiers.split(",") if m.strip()]
+                    modifiers = [m.strip()
+                                 for m in modifiers.split(",") if m.strip()]
                 notes = (item.get("notes") or "").strip()
 
                 # Combine modifiers + notes
@@ -166,12 +235,16 @@ class Tandoor:
                 note = " | ".join([p for p in note_parts if p]) or None
 
                 amount = self._coerce_num(qty_s)
-                unit_id = self._get_or_create_unit(unit_name, headers) if unit_name else None
-                food_id = self._get_or_create_food(food_name, headers) if food_name else None
+                unit_id = self._get_or_create_unit(
+                    unit_name, headers) if unit_name else None
+                food_id = self._get_or_create_food(
+                    food_name, headers) if food_name else None
 
                 # Tandoor requires both id and name for unit/food objects
-                unit_obj = {"id": unit_id, "name": unit_name} if unit_id and unit_name else None
-                food_obj = {"id": food_id, "name": food_name} if food_id and food_name else None
+                unit_obj = {"id": unit_id,
+                            "name": unit_name} if unit_id and unit_name else None
+                food_obj = {"id": food_id,
+                            "name": food_name} if food_id and food_name else None
 
                 ingredient = {
                     "amount": amount,
@@ -211,8 +284,10 @@ class Tandoor:
                         food_id = self._get_or_create_food(food_name, headers)
 
                 # Tandoor requires both id and name for unit/food objects
-                unit_obj = {"id": unit_id, "name": unit_name} if unit_id and unit_name else None
-                food_obj = {"id": food_id, "name": food_name} if food_id and food_name else None
+                unit_obj = {"id": unit_id,
+                            "name": unit_name} if unit_id and unit_name else None
+                food_obj = {"id": food_id,
+                            "name": food_name} if food_id and food_name else None
 
                 ingredient = {
                     "amount": amount,
@@ -289,15 +364,18 @@ class Tandoor:
         if total_time and not (working_time or waiting_time):
             working_time = total_time
 
-        source_url = recipe_data.get("url") or recipe_data.get("source_url") or ""
+        source_url = recipe_data.get(
+            "url") or recipe_data.get("source_url") or ""
+
+        # Preload caches to reduce API calls (2 requests instead of N*2)
+        self._preload_caches(headers)
 
         # Build ingredients and steps
         ingredients = self._build_ingredients(recipe_data, headers)
         steps = self._build_steps(recipe_data, headers)
 
-        # Tandoor expects ingredients inside steps.
-        # Do NOT attach ingredients to steps - let Tandoor display them at recipe level only.
-        # If there are no steps, create a default one without ingredients embedded.
+        # Tandoor requires ingredients to be attached to steps.
+        # If there are no steps, create a default one.
         if not steps:
             combined_instructions = description or "Follow the recipe instructions."
             steps = [{
@@ -307,6 +385,10 @@ class Tandoor:
                 "time": working_time + waiting_time,
                 "name": "",
             }]
+
+        # Attach all ingredients to the first step (Tandoor's model)
+        if steps and ingredients:
+            steps[0]["ingredients"] = ingredients
 
         payload = {
             "name": name,
@@ -358,11 +440,11 @@ class Tandoor:
         """
         Upload an image for a recipe.
         PUT /api/recipe/{id}/image/
-        
+
         Args:
             recipe_id: The ID of the recipe to upload the image for.
             image_path: Path to the image file (JPEG/PNG).
-        
+
         Returns:
             True if upload succeeded, False otherwise.
         """
@@ -376,20 +458,22 @@ class Tandoor:
         }
 
         url = f"{self.base_url}/api/recipe/{recipe_id}/image/"
-        
+
         # Determine content type from file extension
         ext = os.path.splitext(image_path)[1].lower()
-        content_type = "image/jpeg" if ext in (".jpg", ".jpeg") else "image/png"
+        content_type = "image/jpeg" if ext in (".jpg",
+                                               ".jpeg") else "image/png"
 
         print(f"[Tandoor] Uploading image to recipe {recipe_id}")
-        
+
         try:
             with open(image_path, "rb") as f:
-                files = {"image": (os.path.basename(image_path), f, content_type)}
+                files = {"image": (os.path.basename(
+                    image_path), f, content_type)}
                 resp = requests.put(url, files=files, headers=headers)
-            
+
             print(f"[Tandoor] Image upload status: {resp.status_code}")
-            
+
             if resp.status_code in (200, 201, 204):
                 print(f"[Tandoor] Image uploaded successfully")
                 return True
@@ -399,4 +483,3 @@ class Tandoor:
         except Exception as e:
             print(f"[Tandoor] Image upload error: {e}")
             return False
-

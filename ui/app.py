@@ -4,29 +4,37 @@ A Flask-based web interface for video recipe extraction with authentication and 
 """
 
 # Monkey-patch for async support - MUST be at the very top before other imports
+from database import (
+    init_db, load_config, save_config,
+    verify_user, update_password, hash_password
+)
+from flask_socketio import SocketIO, emit
+from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
+from dotenv import load_dotenv
+from functools import wraps
+from datetime import timedelta
+import base64
+import secrets
+import sys
+import os
 import eventlet
 eventlet.monkey_patch()
 
-import os
-import sys
-import secrets
-import base64
-from functools import wraps
-from dotenv import load_dotenv
-from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
-from flask_socketio import SocketIO, emit
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import database module
-from database import (
-    init_db, load_config, save_config,
-    verify_user, update_password, hash_password
-)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', secrets.token_hex(32))
+
+# Configure session cookie settings
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(
+    days=30)  # Remember for 30 days
+
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 # Initialize database
@@ -60,9 +68,13 @@ def login():
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '')
+        remember_me = request.form.get('remember_me') == 'on'
 
         if verify_user(username, password):
             session['user'] = username
+            # Make session permanent if "Remember Me" is checked
+            if remember_me:
+                session.permanent = True
             flash('Login successful!', 'success')
             return redirect(url_for('index'))
         else:
@@ -101,7 +113,8 @@ def settings():
         config['output_target'] = request.form.get('output_target', 'tandoor')
         config['whisper_model'] = request.form.get('whisper_model', 'small')
         # Checkbox: present in form data only when checked
-        config['confirm_before_upload'] = 'true' if request.form.get('confirm_before_upload') else 'false'
+        config['confirm_before_upload'] = 'true' if request.form.get(
+            'confirm_before_upload') else 'false'
 
         save_config(config)
         flash('Settings saved successfully!', 'success')
@@ -262,17 +275,17 @@ def process_video_task(url):
         if config.CONFIRM_BEFORE_UPLOAD:
             # Show preview and wait for user confirmation
             emit_progress('preview', 'Waiting for your confirmation...', 90)
-            
+
             # Prepare image data for preview if available
             image_data = None
             if image_path and os.path.exists(image_path):
                 with open(image_path, 'rb') as f:
                     image_data = base64.b64encode(f.read()).decode('utf-8')
-            
+
             # Create event for waiting
             confirm_event = eventlet.event.Event()
             upload_id = secrets.token_hex(16)
-            
+
             pending_uploads[upload_id] = {
                 'recipe': recipe_data,
                 'image_path': image_path,
@@ -280,7 +293,7 @@ def process_video_task(url):
                 'event': confirm_event,
                 'confirmed': None
             }
-            
+
             # Send preview to client
             socketio.emit('recipe_preview', {
                 'upload_id': upload_id,
@@ -289,7 +302,7 @@ def process_video_task(url):
                 'output_target': config.OUTPUT_TARGET
             })
             eventlet.sleep(0.1)  # Small delay to ensure emit is sent
-            
+
             # Wait for user response (with timeout)
             try:
                 confirmed = confirm_event.wait(timeout=300)  # 5 minute timeout
@@ -298,19 +311,22 @@ def process_video_task(url):
                 emit_progress('error', 'Upload confirmation timed out', 100)
                 del pending_uploads[upload_id]
                 return
-            
+
             # Clean up pending upload
             pending_data = pending_uploads.pop(upload_id, None)
-            
+
             if not confirmed:
                 emit_progress('cancelled', 'Upload cancelled by user', 100)
-                socketio.emit('recipe_cancelled', {'message': 'Recipe upload was cancelled'})
+                socketio.emit('recipe_cancelled', {
+                              'message': 'Recipe upload was cancelled'})
                 return
-            
-            emit_progress('upload', f'Uploading to {config.OUTPUT_TARGET}...', 95)
+
+            emit_progress(
+                'upload', f'Uploading to {config.OUTPUT_TARGET}...', 95)
         else:
-            emit_progress('upload', f'Uploading to {config.OUTPUT_TARGET}...', 95)
-        
+            emit_progress(
+                'upload', f'Uploading to {config.OUTPUT_TARGET}...', 95)
+
         eventlet.sleep(0)  # Yield to event loop
 
         if config.OUTPUT_TARGET == 'tandoor':
