@@ -4,13 +4,31 @@ import re
 from datetime import datetime, timezone
 
 from config import config
-from helpers import RECIPE_SYSTEM_PROMPT, YIELD_NUTRITION_PROMPT
+from helpers import get_recipe_system_prompt, get_yield_nutrition_prompt
 
 logger = logging.getLogger(__name__)
 
 
 def _normalize_space(s: str) -> str:
     return " ".join(str(s or "").split()).strip()
+
+
+def _extract_json(text: str) -> str:
+    """Extract JSON from text, stripping markdown code blocks if present."""
+    if not text:
+        return text
+    text = text.strip()
+    # Remove markdown code blocks (```json ... ``` or ``` ... ```)
+    if text.startswith("```"):
+        # Find the end of the first line (language specifier)
+        first_newline = text.find("\n")
+        if first_newline != -1:
+            text = text[first_newline + 1:]
+        # Remove trailing ```
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+    return text
 
 
 class Chef:
@@ -49,7 +67,10 @@ class Chef:
                 model=self.model,
                 contents=f"{system_prompt}\n\n{user_content}"
             )
-            return resp.text
+            raw_text = resp.text or ""
+            logger.debug(f"Gemini raw response: {raw_text[:500]}...")
+            # Extract JSON from markdown code blocks if present
+            return _extract_json(raw_text)
         else:
             raise ValueError(f"Unknown LLM provider: {self.provider}")
 
@@ -136,7 +157,7 @@ class Chef:
         }
 
         response_text = self._call_llm(
-            RECIPE_SYSTEM_PROMPT,
+            get_recipe_system_prompt(),
             json.dumps(payload, ensure_ascii=False)
         )
 
@@ -163,7 +184,7 @@ class Chef:
         }
 
         response_text = self._call_llm(
-            YIELD_NUTRITION_PROMPT,
+            get_yield_nutrition_prompt(),
             json.dumps(payload, ensure_ascii=False)
         )
         try:
