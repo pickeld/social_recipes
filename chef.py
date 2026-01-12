@@ -121,9 +121,11 @@ class Chef:
         if not isinstance(dp, str) or len(dp) <= 10:
             data["datePublished"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-        # --- Clean and flatten recipeIngredients ---
+        # --- Clean and deduplicate recipeIngredients ---
         ingredients = data.get("recipeIngredients") or []
         clean = []
+        seen_foods: dict[str, int] = {}  # Map food name (casefolded) to index in clean list
+        
         for i in ingredients:
             if not isinstance(i, dict):
                 continue
@@ -133,7 +135,47 @@ class Chef:
             note = " ".join(str(i.get("note", "")).split()).strip()
             if not food:
                 continue
-            clean.append({"food": food, "quantity": qty, "unit": unit, "note": note})
+            
+            food_key = food.casefold()
+            if food_key in seen_foods:
+                # Merge duplicate: combine quantities or notes
+                existing_idx = seen_foods[food_key]
+                existing = clean[existing_idx]
+                
+                # If same quantity and unit, just merge notes
+                if existing["quantity"] == qty and existing["unit"] == unit:
+                    if note and note not in existing["note"]:
+                        if existing["note"]:
+                            existing["note"] = f"{existing['note']}, {note}"
+                        else:
+                            existing["note"] = note
+                # If different quantities, combine them (e.g., "1 + 1" or just add second amount)
+                elif qty and existing["quantity"]:
+                    # Try to add numeric quantities
+                    try:
+                        existing_num = float(existing["quantity"].replace(",", "."))
+                        new_num = float(qty.replace(",", "."))
+                        if existing["unit"] == unit:
+                            # Same unit, sum them up
+                            total = existing_num + new_num
+                            existing["quantity"] = str(int(total) if total == int(total) else total)
+                            if note and note not in existing["note"]:
+                                if existing["note"]:
+                                    existing["note"] = f"{existing['note']}, {note}"
+                                else:
+                                    existing["note"] = note
+                        else:
+                            # Different units, keep both as separate entries
+                            clean.append({"food": food, "quantity": qty, "unit": unit, "note": note})
+                    except ValueError:
+                        # Non-numeric quantities, keep as separate entries
+                        clean.append({"food": food, "quantity": qty, "unit": unit, "note": note})
+                else:
+                    # One or both have no quantity, keep both
+                    clean.append({"food": food, "quantity": qty, "unit": unit, "note": note})
+            else:
+                seen_foods[food_key] = len(clean)
+                clean.append({"food": food, "quantity": qty, "unit": unit, "note": note})
 
         # overwrite structured list
         data["recipeIngredients"] = clean

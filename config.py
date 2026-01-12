@@ -17,5 +17,8 @@ class Config:
     TANDOOR_HOST: str = os.getenv("TANDOOR_HOST", "https://tandoor.pickel.me")
     TARGET_LANGUAGE: str = os.getenv("TARGET_LANGUAGE", "he")
     OUTPUT_TARGET: str = os.getenv("OUTPUT_TARGET", "tandoor")
+    # Whisper model for audio transcription: tiny, base, small, medium, large-v3
+    # Larger models are more accurate but slower. 'small' is recommended for mixed-language content.
+    WHISPER_MODEL: str = os.getenv("WHISPER_MODEL", "small")
 
 config = Config()

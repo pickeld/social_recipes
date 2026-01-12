@@ -9,12 +9,12 @@ class Transcriber:
     def __init__(
         self,
         video_path: str,
-        model_size: str = "base",     # tiny | base | small | medium | large-v3
-        device: str = "auto",         # "cpu" or "cuda"
-        compute_type: str = "auto"    # "float16"/"int8"/"auto"
+        model_size: str | None = None,  # tiny | base | small | medium | large-v3 (defaults to config.WHISPER_MODEL)
+        device: str = "auto",           # "cpu" or "cuda"
+        compute_type: str = "auto"      # "float16"/"int8"/"auto"
     ):
         self.video_path = video_path
-        self.model_size = model_size
+        self.model_size = model_size or config.WHISPER_MODEL
         self.device = device
         self.compute_type = compute_type
         self.model = None

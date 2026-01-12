@@ -1,3 +1,4 @@
+import argparse
 import json
 import os
 from chef import Chef
@@ -5,6 +6,7 @@ from config import config
 from mealie import Mealie
 from tiktok import Tiktok
 from transcriber import Transcriber
+from image_extractor import extract_dish_image
 
 
 def main(video_url: str):
@@ -54,29 +56,69 @@ def main(video_url: str):
 === ON-SCREEN TEXT (ingredients, instructions, etc.) ===
 {visual_text}"""
     
+    # Extract best dish image from video (cached)
+    image_path = None
+    image_cache = f"tmp/{vid_id}_dish.jpg"
+    if os.path.exists(image_cache):
+        print("Using cached dish image.")
+        image_path = image_cache
+    else:
+        print("Extracting best dish image from video...")
+        try:
+            image_path = extract_dish_image(video_path)
+            if image_path:
+                print(f"Dish image extracted: {image_path}")
+        except Exception as e:
+            print(f"Warning: Could not extract dish image: {e}")
+    
     return {
         "title": title,
         "description": description,
         "video_path": video_path,
-        "transcription": combined_transcription
+        "transcription": combined_transcription,
+        "image_path": image_path
     }
 
 
 if __name__ == "__main__":
-    url = "https://www.tiktok.com/@recipeincaption/video/7532985862854921477"
-    results = main(url)
-    chef = Chef(source_url=url, description=results["description"],
-                transcription=results["transcription"])
+    parser = argparse.ArgumentParser(description="Extract recipe from TikTok video")
+    parser.add_argument("url", nargs="?",
+                        default="https://www.tiktok.com/@recipeincaption/video/7532985862854921477",
+                        help="TikTok video URL")
+    parser.add_argument("--no-upload", action="store_true",
+                        help="Skip uploading to recipe manager (for testing)")
+    args = parser.parse_args()
+    
+    url = args.url
+    video_results = main(url)
+    chef = Chef(source_url=url, description=video_results["description"],
+                transcription=video_results["transcription"])
 
-    results = chef.create_recipe()
-    if not results:
+    recipe_data = chef.create_recipe()
+    if not recipe_data:
         print("No recipe created.")
     else:
-        if config.OUTPUT_TARGET == "tandoor":
-            from tandoor import Tandoor
-            tandoor = Tandoor()
-            tandoor_recipe = tandoor.create_recipe(results)
-        elif config.OUTPUT_TARGET == "mealie":
-            mealie = Mealie()
-            mealie_recipe = mealie.create_recipe(results)
-    print(results)
+        image_path = video_results.get("image_path")
+        
+        if not args.no_upload:
+            if config.OUTPUT_TARGET == "tandoor":
+                from tandoor import Tandoor
+                tandoor = Tandoor()
+                tandoor_recipe = tandoor.create_recipe(recipe_data)
+                
+                # Upload dish image if available
+                if image_path and tandoor_recipe.get("id"):
+                    print("Uploading dish image to Tandoor...")
+                    tandoor.upload_image(tandoor_recipe["id"], image_path)
+                    
+            elif config.OUTPUT_TARGET == "mealie":
+                mealie = Mealie()
+                mealie_recipe = mealie.create_recipe(recipe_data)
+                
+                # Upload dish image if available
+                recipe_slug = mealie_recipe.get("slug") or mealie_recipe.get("id")
+                if image_path and recipe_slug:
+                    print("Uploading dish image to Mealie...")
+                    mealie.upload_image(recipe_slug, image_path)
+                
+    print(json.dumps(recipe_data, ensure_ascii=False, indent=2))

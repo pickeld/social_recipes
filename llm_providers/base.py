@@ -25,17 +25,19 @@ class LLMImageSelector(ABC):
 
     def _get_selection_prompt(self, num_frames: int) -> str:
         """Get the prompt for frame selection."""
-        return f"""You are analyzing {num_frames} frames from a cooking video to find the BEST image of the finished dish.
+        return f"""You are analyzing {num_frames} frames from a cooking video to find the BEST image that describes and represents the dish being made.
 
-Look for a frame that shows:
-1. The COMPLETED/FINISHED dish (not preparation steps)
-2. Appetizing presentation with good lighting
-3. Clear, well-focused image
-4. The food as the main subject (not the cook's face or hands)
-5. Attractive plating or serving presentation
+Select the frame that best:
+1. DESCRIBES THE DISH - Shows what the dish actually is (ingredients, style, cuisine type are visible/recognizable)
+2. REPRESENTS THE FINAL RESULT - Shows the completed/finished dish, not preparation steps
+3. IDENTIFIES THE FOOD - A viewer can clearly understand what dish this is just by looking at the image
+4. Shows appetizing presentation with good lighting and the food as the main subject
+5. Has clear focus and attractive plating where the dish's key characteristics are visible
+
+PRIORITY: Choose the image that someone could look at and immediately understand "this is [dish name]". The image should capture the essence and identity of the dish.
 
 Respond with ONLY the number (0-{num_frames - 1}) of the best frame.
-If none show a finished dish, pick the most appetizing food image.
+If none show a finished dish, pick the frame that best describes what food is being made.
 Just respond with the single number, nothing else."""
 
     def _parse_selection_response(self, response: str, max_idx: int) -> int | None:
