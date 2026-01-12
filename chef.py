@@ -9,10 +9,6 @@ from helpers import get_recipe_system_prompt, get_yield_nutrition_prompt
 logger = logging.getLogger(__name__)
 
 
-def _normalize_space(s: str) -> str:
-    return " ".join(str(s or "").split()).strip()
-
-
 def _extract_json(text: str) -> str:
     """Extract JSON from text, stripping markdown code blocks if present."""
     if not text:
@@ -73,42 +69,6 @@ class Chef:
             return _extract_json(raw_text)
         else:
             raise ValueError(f"Unknown LLM provider: {self.provider}")
-
-    def _clean_mealie_and_schema_lists(self, data: dict) -> None:
-        # Clean recipeIngredients (objects)
-        cleaned, seen = [], set()
-        for it in data.get("recipeIngredients") or []:
-            food = _normalize_space(it.get("food", ""))
-            quantity = _normalize_space(it.get("quantity", ""))
-            unit = _normalize_space(it.get("unit", ""))
-            note = _normalize_space(it.get("note", ""))
-
-            key = (food.casefold(), quantity, unit, note.casefold())
-            if not food:
-                continue
-            if key in seen:
-                continue
-            seen.add(key)
-
-            cleaned.append({
-                "food": food,
-                "quantity": quantity,
-                "unit": unit,
-                "note": note,
-            })
-
-        data["recipeIngredients"] = cleaned
-
-        # Derive Schema.org recipeIngredient (strings) from the objects
-        lines = []
-        for it in cleaned:
-            parts = [it["quantity"], it["unit"], it["food"], it["note"]]
-            line = _normalize_space(" ".join(p for p in parts if p))
-            if line:
-                lines.append(line)
-        data["recipeIngredient"] = lines
-
-    # ----------------- Recipe generation -----------------
 
     def _postprocess_recipe(self, data: dict, source_url: str | None) -> dict:
         data.setdefault("@context", "https://schema.org")

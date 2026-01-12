@@ -89,7 +89,3 @@ Output recipeYield in {target_lang}.
 """
 
 
-# Keep backward-compatible constants that call the functions
-# (These are evaluated at import time, so language changes require reimport)
-RECIPE_SYSTEM_PROMPT = get_recipe_system_prompt()
-YIELD_NUTRITION_PROMPT = get_yield_nutrition_prompt()
