@@ -1,6 +1,7 @@
 from config import config
 import requests
 import re
+import os
 
 
 class Tandoor:
@@ -352,11 +353,58 @@ class Tandoor:
 
         try:
             result = resp.json()
-            print(f"[Tandoor] Recipe created with ID: {result.get('id')}")
+            recipe_id = result.get('id')
+            print(f"[Tandoor] Recipe created with ID: {recipe_id}")
             return result
         except Exception as e:
             print(f"[Tandoor] JSON parse error: {e}")
             return {"raw": resp.text}
+
+    def upload_image(self, recipe_id: int, image_path: str) -> bool:
+        """
+        Upload an image for a recipe.
+        PUT /api/recipe/{id}/image/
+        
+        Args:
+            recipe_id: The ID of the recipe to upload the image for.
+            image_path: Path to the image file (JPEG/PNG).
+        
+        Returns:
+            True if upload succeeded, False otherwise.
+        """
+        if not os.path.exists(image_path):
+            print(f"[Tandoor] Image file not found: {image_path}")
+            return False
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Accept": "application/json",
+        }
+
+        url = f"{self.base_url}/api/recipe/{recipe_id}/image/"
+        
+        # Determine content type from file extension
+        ext = os.path.splitext(image_path)[1].lower()
+        content_type = "image/jpeg" if ext in (".jpg", ".jpeg") else "image/png"
+
+        print(f"[Tandoor] Uploading image to recipe {recipe_id}")
+        
+        try:
+            with open(image_path, "rb") as f:
+                files = {"image": (os.path.basename(image_path), f, content_type)}
+                resp = requests.put(url, files=files, headers=headers)
+            
+            print(f"[Tandoor] Image upload status: {resp.status_code}")
+            
+            if resp.status_code in (200, 201, 204):
+                print(f"[Tandoor] Image uploaded successfully")
+                return True
+            else:
+                print(f"[Tandoor] Image upload failed: {resp.text[:500]}")
+                return False
+        except Exception as e:
+            print(f"[Tandoor] Image upload error: {e}")
+            return False
 
     def get_recipe(self, recipe_id: int) -> dict:
         """

@@ -1,6 +1,7 @@
 from config import config
 import requests
 import re
+import os
 
 
 class Mealie:
@@ -370,3 +371,49 @@ class Mealie:
             print(f"[Mealie] Import response body (error): {resp.text[:1500]}")
             resp.raise_for_status()
         return resp.json()
+
+    def upload_image(self, recipe_slug: str, image_path: str) -> bool:
+        """
+        Upload an image for a recipe.
+        PUT /api/recipes/{slug}/image
+        
+        Args:
+            recipe_slug: The slug or ID of the recipe.
+            image_path: Path to the image file (JPEG/PNG).
+        
+        Returns:
+            True if upload succeeded, False otherwise.
+        """
+        if not os.path.exists(image_path):
+            print(f"[Mealie] Image file not found: {image_path}")
+            return False
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Accept": "application/json",
+        }
+
+        url = f"{self.base_url}/api/recipes/{recipe_slug}/image"
+        
+        # Determine content type from file extension
+        ext = os.path.splitext(image_path)[1].lower()
+        content_type = "image/jpeg" if ext in (".jpg", ".jpeg") else "image/png"
+
+        print(f"[Mealie] Uploading image to recipe {recipe_slug}")
+        
+        try:
+            with open(image_path, "rb") as f:
+                files = {"image": (os.path.basename(image_path), f, content_type)}
+                resp = requests.put(url, files=files, headers=headers)
+            
+            print(f"[Mealie] Image upload status: {resp.status_code}")
+            
+            if resp.status_code in (200, 201, 204):
+                print(f"[Mealie] Image uploaded successfully")
+                return True
+            else:
+                print(f"[Mealie] Image upload failed: {resp.text[:500]}")
+                return False
+        except Exception as e:
+            print(f"[Mealie] Image upload error: {e}")
+            return False
