@@ -5,8 +5,8 @@ Uses LLM vision to analyze frames and select the most appealing shot of the fini
 
 import os
 import subprocess
-import base64
-from config import config
+import shutil
+from llm_providers import get_image_selector
 
 
 class ImageExtractor:
@@ -38,10 +38,17 @@ class ImageExtractor:
             return None
 
         # Use LLM to select the best frame
-        best_frame_idx = self._select_best_frame(frames)
+        try:
+            selector = get_image_selector()
+            best_frame_idx = selector.select_best_frame(frames)
+        except Exception as e:
+            print(f"[ImageExtractor] LLM selection failed: {e}")
+            best_frame_idx = None
+
         if best_frame_idx is None:
             # Fallback: use the last frame (most likely to show finished dish)
             best_frame_idx = len(frames) - 1
+            print(f"[ImageExtractor] Using fallback frame index: {best_frame_idx}")
 
         best_frame = frames[best_frame_idx]
         
@@ -124,114 +131,6 @@ class ImageExtractor:
         except (subprocess.CalledProcessError, ValueError):
             return 30.0  # Default assumption
 
-    def _select_best_frame(self, frame_paths: list[str]) -> int | None:
-        """
-        Use LLM vision to select the best frame showing the finished dish.
-        
-        Returns:
-            Index of the best frame, or None if selection fails.
-        """
-        if config.LLM_PROVIDER == "gemini":
-            return self._select_best_frame_gemini(frame_paths)
-        elif config.LLM_PROVIDER == "openai":
-            return self._select_best_frame_openai(frame_paths)
-        else:
-            print(f"[ImageExtractor] LLM provider {config.LLM_PROVIDER} not supported for image selection")
-            return None
-
-    def _select_best_frame_gemini(self, frame_paths: list[str]) -> int | None:
-        """Select best frame using Gemini vision."""
-        from google import genai
-        from google.genai import types
-
-        client = genai.Client(api_key=config.GEMINI_API_KEY)
-
-        # Prepare image parts
-        parts = []
-        for i, path in enumerate(frame_paths):
-            with open(path, "rb") as f:
-                image_data = f.read()
-            parts.append(types.Part.from_bytes(
-                data=image_data,
-                mime_type="image/jpeg"
-            ))
-            parts.append(types.Part.from_text(text=f"[Image {i}]"))
-
-        prompt = self._get_selection_prompt(len(frame_paths))
-        parts.append(types.Part.from_text(text=prompt))
-
-        try:
-            response = client.models.generate_content(
-                model=config.GEMINI_MODEL,
-                contents=[types.Content(role="user", parts=parts)],
-            )
-            return self._parse_selection_response(response.text or "", len(frame_paths))
-        except Exception as e:
-            print(f"[ImageExtractor] Gemini selection error: {e}")
-            return None
-
-    def _select_best_frame_openai(self, frame_paths: list[str]) -> int | None:
-        """Select best frame using OpenAI vision."""
-        from openai import OpenAI
-
-        client = OpenAI(api_key=config.OPENAI_API_KEY)
-
-        # Encode frames as base64
-        image_contents = []
-        for i, frame_path in enumerate(frame_paths):
-            with open(frame_path, "rb") as f:
-                b64_image = base64.standard_b64encode(f.read()).decode("utf-8")
-            image_contents.append({
-                "type": "image_url",
-                "image_url": {
-                    "url": f"data:image/jpeg;base64,{b64_image}",
-                    "detail": "low"  # Use low detail for faster selection
-                }
-            })
-            image_contents.append({
-                "type": "text",
-                "text": f"[Image {i}]"
-            })
-
-        prompt = self._get_selection_prompt(len(frame_paths))
-        image_contents.append({"type": "text", "text": prompt})
-
-        try:
-            response = client.responses.create(
-                model=config.OPENAI_MODEL,
-                input=[{"role": "user", "content": image_contents}]
-            )
-            return self._parse_selection_response(response.output_text or "", len(frame_paths))
-        except Exception as e:
-            print(f"[ImageExtractor] OpenAI selection error: {e}")
-            return None
-
-    def _get_selection_prompt(self, num_frames: int) -> str:
-        """Get the prompt for frame selection."""
-        return f"""You are analyzing {num_frames} frames from a cooking video to find the BEST image of the finished dish.
-
-Look for a frame that shows:
-1. The COMPLETED/FINISHED dish (not preparation steps)
-2. Appetizing presentation with good lighting
-3. Clear, well-focused image
-4. The food as the main subject (not the cook's face or hands)
-5. Attractive plating or serving presentation
-
-Respond with ONLY the number (0-{num_frames - 1}) of the best frame.
-If none show a finished dish, pick the most appetizing food image.
-Just respond with the single number, nothing else."""
-
-    def _parse_selection_response(self, response: str, max_idx: int) -> int | None:
-        """Parse LLM response to get frame index."""
-        import re
-        # Find first number in response
-        match = re.search(r"\d+", response.strip())
-        if match:
-            idx = int(match.group())
-            if 0 <= idx < max_idx:
-                return idx
-        return None
-
     def _enhance_frame(self, source_path: str, output_path: str):
         """
         Create an enhanced version of the selected frame.
@@ -248,7 +147,6 @@ Just respond with the single number, nothing else."""
             subprocess.run(cmd, capture_output=True, check=True)
         except subprocess.CalledProcessError:
             # Fallback: just copy the file
-            import shutil
             shutil.copy2(source_path, output_path)
 
 
