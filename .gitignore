@@ -156,3 +156,6 @@ downloads/
 output/
 temp/
 tmp/
+
+# Social Recipes database
+social_recipes.db
