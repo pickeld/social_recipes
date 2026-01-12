@@ -3,7 +3,6 @@ Social Recipes Web UI
 A Flask-based web interface for video recipe extraction with authentication and configuration management.
 """
 
-# Monkey-patch for async support - MUST be at the very top before other imports
 from database import (
     init_db, load_config, save_config,
     verify_user, update_password, hash_password
@@ -13,12 +12,11 @@ from flask import Flask, render_template, request, redirect, url_for, session, f
 from dotenv import load_dotenv
 from functools import wraps
 from datetime import timedelta
+import threading
 import base64
 import secrets
 import sys
 import os
-import eventlet
-eventlet.monkey_patch()
 
 
 # Add parent directory to path for imports
@@ -35,13 +33,14 @@ app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(
     days=30)  # Remember for 30 days
 
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+# Use threading mode instead of eventlet to avoid monkey-patching issues with SSL/requests
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 # Initialize database
 init_db()
 
 # Store pending recipe uploads waiting for confirmation
-# Key: session_id, Value: {'recipe': recipe_data, 'image_path': path, 'event': eventlet.event.Event(), 'confirmed': bool}
+# Key: upload_id, Value: {'recipe': recipe_data, 'image_path': path, 'event': threading.Event(), 'confirmed': bool}
 pending_uploads = {}
 
 
@@ -176,7 +175,6 @@ def process_video_task(url):
 
         # Step 1: Get video info
         emit_progress('info', 'Fetching video information...', 10)
-        eventlet.sleep(0)  # Yield to event loop
         downloader = VideoDownloader(url)
         item = downloader._get_info()
         description = item.get("description", "No description available.")
@@ -185,7 +183,6 @@ def process_video_task(url):
 
         # Step 2: Download video
         emit_progress('download', 'Downloading video...', 20)
-        eventlet.sleep(0)  # Yield to event loop
         vid_id, video_path = downloader._download_video()
         if vid_id is None:
             emit_progress('error', 'Failed to download video', 100)
@@ -195,7 +192,6 @@ def process_video_task(url):
 
         # Step 3: Transcribe audio
         emit_progress('transcribe', 'Transcribing audio...', 35)
-        eventlet.sleep(0)  # Yield to event loop
         transcriber = Transcriber(video_path)
         lang = config.TARGET_LANGUAGE
 
@@ -206,14 +202,12 @@ def process_video_task(url):
                 transcription = f.read()
         else:
             transcription = transcriber.transcribe()
-            eventlet.sleep(0)  # Yield after CPU-intensive transcription
             with open(audio_cache, "w") as f:
                 f.write(transcription)
         emit_progress('transcribe', 'Audio transcribed', 50)
 
         # Step 4: Extract visual text
         emit_progress('visual', 'Extracting on-screen text...', 55)
-        eventlet.sleep(0)  # Yield to event loop
         visual_text = ""
         visual_cache = os.path.join(dish_dir, f"visual_{lang}.txt")
         if os.path.exists(visual_cache):
@@ -223,7 +217,6 @@ def process_video_task(url):
         else:
             try:
                 visual_text = transcriber.extract_visual_text()
-                eventlet.sleep(0)  # Yield after LLM call
                 with open(visual_cache, "w") as f:
                     f.write(visual_text)
             except Exception as e:
@@ -242,7 +235,6 @@ def process_video_task(url):
 
         # Step 5: Extract dish image
         emit_progress('image', 'Extracting dish image...', 70)
-        eventlet.sleep(0)  # Yield to event loop
         image_path = None
         image_cache = os.path.join(dish_dir, "dish.jpg")
         if os.path.exists(image_cache):
@@ -251,7 +243,6 @@ def process_video_task(url):
         else:
             try:
                 image_path = extract_dish_image(video_path)
-                eventlet.sleep(0)  # Yield after image extraction
             except Exception as e:
                 emit_progress(
                     'image', f'Warning: Could not extract image: {e}', 75)
@@ -259,11 +250,9 @@ def process_video_task(url):
 
         # Step 6: Create recipe with AI
         emit_progress('evaluate', 'Creating recipe with AI...', 85)
-        eventlet.sleep(0)  # Yield to event loop
         chef = Chef(source_url=url, description=description,
                     transcription=combined_transcription)
         recipe_data = chef.create_recipe()
-        eventlet.sleep(0)  # Yield after LLM call
 
         if not recipe_data:
             emit_progress('error', 'Failed to create recipe', 100)
@@ -282,8 +271,8 @@ def process_video_task(url):
                 with open(image_path, 'rb') as f:
                     image_data = base64.b64encode(f.read()).decode('utf-8')
 
-            # Create event for waiting
-            confirm_event = eventlet.event.Event()
+            # Create event for waiting (using threading.Event)
+            confirm_event = threading.Event()
             upload_id = secrets.token_hex(16)
 
             pending_uploads[upload_id] = {
@@ -301,21 +290,18 @@ def process_video_task(url):
                 'image_data': image_data,
                 'output_target': config.OUTPUT_TARGET
             })
-            eventlet.sleep(0.1)  # Small delay to ensure emit is sent
 
-            # Wait for user response (with timeout)
-            try:
-                confirmed = confirm_event.wait(timeout=300)  # 5 minute timeout
-            except eventlet.Timeout:
-                confirmed = False
-                emit_progress('error', 'Upload confirmation timed out', 100)
-                del pending_uploads[upload_id]
-                return
-
-            # Clean up pending upload
+            # Wait for user response (with timeout) - threading.Event.wait returns True if set, False on timeout
+            confirmed = confirm_event.wait(timeout=300)  # 5 minute timeout
+            
+            # Check if we actually got a confirmation or just timed out
             pending_data = pending_uploads.pop(upload_id, None)
-
+            
             if not confirmed:
+                emit_progress('error', 'Upload confirmation timed out', 100)
+                return
+            
+            if pending_data and not pending_data.get('confirmed', False):
                 emit_progress('cancelled', 'Upload cancelled by user', 100)
                 socketio.emit('recipe_cancelled', {
                               'message': 'Recipe upload was cancelled'})
@@ -326,8 +312,6 @@ def process_video_task(url):
         else:
             emit_progress(
                 'upload', f'Uploading to {config.OUTPUT_TARGET}...', 95)
-
-        eventlet.sleep(0)  # Yield to event loop
 
         if config.OUTPUT_TARGET == 'tandoor':
             from tandoor import Tandoor
@@ -371,7 +355,7 @@ def handle_confirm_upload(data):
     upload_id = data.get('upload_id')
     if upload_id and upload_id in pending_uploads:
         pending_uploads[upload_id]['confirmed'] = True
-        pending_uploads[upload_id]['event'].send(True)
+        pending_uploads[upload_id]['event'].set()  # threading.Event uses set()
 
 
 @socketio.on('cancel_upload')
@@ -380,7 +364,7 @@ def handle_cancel_upload(data):
     upload_id = data.get('upload_id')
     if upload_id and upload_id in pending_uploads:
         pending_uploads[upload_id]['confirmed'] = False
-        pending_uploads[upload_id]['event'].send(False)
+        pending_uploads[upload_id]['event'].set()  # threading.Event uses set()
 
 
 if __name__ == '__main__':

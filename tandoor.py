@@ -1,39 +1,10 @@
 from config import config
 import re
 import os
-import sys
-import threading
 
-# Use requests.Session for connection reuse and better eventlet compatibility
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-
-
-def _is_eventlet_patched() -> bool:
-    """
-    Check if eventlet has monkey-patched the socket module.
-    This is checked at runtime because the patch may happen after this module is imported.
-    """
-    try:
-        import eventlet.patcher
-        return eventlet.patcher.is_monkey_patched('socket')
-    except (ImportError, AttributeError):
-        pass
-    
-    # Fallback: check socket module directly
-    try:
-        import socket
-        # eventlet patches socket.socket with its own GreenSocket class
-        socket_class_str = str(type(socket.socket))
-        if 'eventlet' in socket_class_str.lower() or 'green' in socket_class_str.lower():
-            return True
-        if hasattr(socket.socket, '__module__') and 'eventlet' in str(socket.socket.__module__):
-            return True
-    except Exception:
-        pass
-    
-    return False
 
 
 def _create_session() -> requests.Session:
@@ -44,130 +15,10 @@ def _create_session() -> requests.Session:
         backoff_factor=0.5,
         status_forcelist=[500, 502, 503, 504],
     )
-    adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=1, pool_maxsize=1)
+    adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=10, pool_maxsize=10)
     session.mount("http://", adapter)
     session.mount("https://", adapter)
     return session
-
-
-# Thread-local storage for native thread sessions (used when running under eventlet)
-_thread_local = threading.local()
-
-
-def _get_native_session() -> requests.Session:
-    """
-    Get or create a requests session for the current native thread.
-    This ensures each native thread has its own session, avoiding eventlet contamination.
-    """
-    if not hasattr(_thread_local, 'session'):
-        _thread_local.session = _create_session()
-    return _thread_local.session
-
-
-def _do_request_in_native_thread(method: str, url: str, headers: dict | None,
-                                  json_data: dict | None, params: dict | None,
-                                  files: tuple | None, timeout: int) -> tuple:
-    """
-    Execute HTTP request in a native OS thread.
-    This function creates its own session to avoid eventlet-patched objects.
-    Returns a tuple of (status_code, response_text, response_json_or_none).
-    """
-    session = _get_native_session()
-    
-    kwargs = {}
-    if headers:
-        kwargs['headers'] = headers
-    if json_data is not None:
-        kwargs['json'] = json_data
-    if params:
-        kwargs['params'] = params
-    if timeout:
-        kwargs['timeout'] = timeout
-    
-    # Handle file uploads specially - files need to be re-opened in this thread
-    if files:
-        file_path, file_name, content_type = files
-        with open(file_path, 'rb') as f:
-            kwargs['files'] = {'image': (file_name, f, content_type)}
-            resp = getattr(session, method)(url, **kwargs)
-    else:
-        resp = getattr(session, method)(url, **kwargs)
-    
-    # Extract response data to simple types that can be safely passed back
-    try:
-        json_result = resp.json()
-    except Exception:
-        json_result = None
-    
-    return (resp.status_code, resp.text, json_result)
-
-
-class _ResponseWrapper:
-    """Simple wrapper to mimic requests.Response for compatibility."""
-    def __init__(self, status_code: int, text: str, json_data):
-        self.status_code = status_code
-        self.text = text
-        self._json_data = json_data
-    
-    def json(self):
-        if self._json_data is None:
-            raise ValueError("No JSON data available")
-        return self._json_data
-    
-    def raise_for_status(self):
-        if self.status_code >= 400:
-            raise requests.HTTPError(f"HTTP {self.status_code}: {self.text[:500]}")
-
-
-def _safe_request(method: str, url: str, session: requests.Session, **kwargs):
-    """
-    Execute HTTP request with eventlet compatibility.
-    Uses tpool if running under eventlet to avoid recursion issues with SSL.
-    
-    Returns: requests.Response or _ResponseWrapper (duck-typed compatible)
-    """
-    if _is_eventlet_patched():
-        try:
-            from eventlet import tpool
-            
-            # Extract only primitive/simple types to pass to native thread
-            headers = kwargs.get('headers')
-            json_data = kwargs.get('json')
-            params = kwargs.get('params')
-            timeout = kwargs.get('timeout', 30)
-            
-            # Handle files specially - pass path info, not file objects
-            files = None
-            if 'files' in kwargs:
-                file_dict = kwargs['files']
-                if 'image' in file_dict:
-                    img_tuple = file_dict['image']
-                    # img_tuple is (filename, file_obj, content_type)
-                    # We need to get the file path - it should have been passed differently
-                    # For now, extract what we can
-                    file_name = img_tuple[0]
-                    content_type = img_tuple[2] if len(img_tuple) > 2 else 'image/jpeg'
-                    # The file object's name attribute should give us the path
-                    file_obj = img_tuple[1]
-                    if hasattr(file_obj, 'name'):
-                        file_path = file_obj.name
-                        files = (file_path, file_name, content_type)
-            
-            # Run the request in a native thread
-            result = tpool.execute(
-                _do_request_in_native_thread,
-                method, url, headers, json_data, params, files, timeout
-            )  # type: ignore
-            
-            return _ResponseWrapper(result[0], result[1], result[2])
-            
-        except Exception as e:
-            # Log the tpool failure and raise it
-            print(f"[Tandoor] tpool.execute failed: {e}")
-            raise
-    else:
-        # eventlet not patched, use regular request
-        return getattr(session, method)(url, **kwargs)
 
 
 class Tandoor:
@@ -182,7 +33,7 @@ class Tandoor:
         # Caches to avoid repeated API calls for same units/foods
         self._unit_cache = {}  # name.lower() -> id
         self._food_cache = {}  # name.lower() -> id
-        # Use a session for connection reuse (better eventlet compatibility)
+        # Use a session for connection reuse
         self._session = _create_session()
 
     def _parse_iso_duration(self, duration: str) -> int:
@@ -239,10 +90,8 @@ class Tandoor:
         """
         # Preload units (usually a small list)
         try:
-            resp = _safe_request(
-                "get",
+            resp = self._session.get(
                 f"{self.base_url}/api/unit/",
-                self._session,
                 headers=headers,
                 params={"page_size": 500},
                 timeout=15
@@ -261,10 +110,8 @@ class Tandoor:
 
         # Preload foods (could be a larger list)
         try:
-            resp = _safe_request(
-                "get",
+            resp = self._session.get(
                 f"{self.base_url}/api/food/",
-                self._session,
                 headers=headers,
                 params={"page_size": 500},
                 timeout=15
@@ -295,9 +142,11 @@ class Tandoor:
         # Search for existing unit
         search_url = f"{self.base_url}/api/unit/"
         try:
-            resp = _safe_request(
-                "get", search_url, self._session,
-                headers=headers, params={"query": unit_name}, timeout=10
+            resp = self._session.get(
+                search_url,
+                headers=headers,
+                params={"query": unit_name},
+                timeout=10
             )
             if resp.status_code == 200:
                 units = resp.json()
@@ -314,9 +163,11 @@ class Tandoor:
         # Create new unit
         create_url = f"{self.base_url}/api/unit/"
         try:
-            resp = _safe_request(
-                "post", create_url, self._session,
-                json={"name": unit_name}, headers=headers, timeout=10
+            resp = self._session.post(
+                create_url,
+                json={"name": unit_name},
+                headers=headers,
+                timeout=10
             )
             if resp.status_code in (200, 201):
                 created = resp.json()
@@ -342,9 +193,11 @@ class Tandoor:
         # Search for existing food
         search_url = f"{self.base_url}/api/food/"
         try:
-            resp = _safe_request(
-                "get", search_url, self._session,
-                headers=headers, params={"query": food_name}, timeout=10
+            resp = self._session.get(
+                search_url,
+                headers=headers,
+                params={"query": food_name},
+                timeout=10
             )
             if resp.status_code == 200:
                 foods = resp.json()
@@ -361,9 +214,11 @@ class Tandoor:
         # Create new food
         create_url = f"{self.base_url}/api/food/"
         try:
-            resp = _safe_request(
-                "post", create_url, self._session,
-                json={"name": food_name}, headers=headers, timeout=10
+            resp = self._session.post(
+                create_url,
+                json={"name": food_name},
+                headers=headers,
+                timeout=10
             )
             if resp.status_code in (200, 201):
                 created = resp.json()
@@ -596,7 +451,7 @@ class Tandoor:
         print(f"[Tandoor] Creating recipe: {payload.get('name')}")
         print(f"[Tandoor] POST {create_url}")
 
-        resp = _safe_request("post", create_url, self._session, json=payload, headers=headers, timeout=30)
+        resp = self._session.post(create_url, json=payload, headers=headers, timeout=30)
         print(f"[Tandoor] Response status: {resp.status_code}")
 
         if resp.status_code >= 400:
@@ -646,7 +501,7 @@ class Tandoor:
             with open(image_path, "rb") as f:
                 files = {"image": (os.path.basename(
                     image_path), f, content_type)}
-                resp = _safe_request("put", url, self._session, files=files, headers=headers, timeout=60)
+                resp = self._session.put(url, files=files, headers=headers, timeout=60)
 
             print(f"[Tandoor] Image upload status: {resp.status_code}")
 
