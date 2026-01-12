@@ -1,9 +1,12 @@
 import json
+import logging
 import re
 from datetime import datetime, timezone
-from openai import OpenAI
+
 from config import config
 from helpers import RECIPE_SYSTEM_PROMPT, YIELD_NUTRITION_PROMPT
+
+logger = logging.getLogger(__name__)
 
 
 def _normalize_space(s: str) -> str:
@@ -12,11 +15,43 @@ def _normalize_space(s: str) -> str:
 
 class Chef:
     def __init__(self, source_url: str, description: str, transcription: str, *, model: str | None = None):
-        self.client = OpenAI(api_key=config.OPENAI_API_KEY)
-        self.model = model or config.OPENAI_MODEL
+        self.provider = config.LLM_PROVIDER
+        
+        if self.provider == "openai":
+            from openai import OpenAI
+            logger.info("Using OpenAI LLM provider")
+            self.client = OpenAI(api_key=config.OPENAI_API_KEY)
+            self.model = model or config.OPENAI_MODEL
+        elif self.provider == "gemini":
+            import google.generativeai as genai
+            logger.info("Using Gemini LLM provider")
+            genai.configure(api_key=config.GEMINI_API_KEY)
+            self.model = model or config.GEMINI_MODEL
+            self.client = genai.GenerativeModel(self.model)
+        else:
+            raise ValueError(f"Unknown LLM provider: {self.provider}")
         self.source_url = source_url
         self.description = description
         self.transcription = transcription
+
+    def _call_llm(self, system_prompt: str, user_content: str) -> str:
+        """Call the LLM and return the response text, abstracting provider differences."""
+        if self.provider == "openai":
+            resp = self.client.responses.create(
+                model=self.model,
+                input=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content},
+                ],
+            )
+            return resp.output_text
+        elif self.provider == "gemini":
+            # Gemini combines system prompt with user content
+            full_prompt = f"{system_prompt}\n\n{user_content}"
+            resp = self.client.generate_content(full_prompt)
+            return resp.text
+        else:
+            raise ValueError(f"Unknown LLM provider: {self.provider}")
 
     def _clean_mealie_and_schema_lists(self, data: dict) -> None:
         # Clean recipeIngredients (objects)
@@ -55,23 +90,42 @@ class Chef:
     # ----------------- Recipe generation -----------------
 
     def _postprocess_recipe(self, data: dict, source_url: str | None) -> dict:
-        """
-        Normalizes and enriches raw model output into a valid Schema.org Recipe.
-        Additionally parses quantities/units for structured ingredients when missing.
-        """
-        # Context & type
         data.setdefault("@context", "https://schema.org")
         data.setdefault("@type", "Recipe")
-        data.setdefault("url", self.source_url)
-        data.setdefault(
-            "video", {"@type": "VideoObject", "url": self.source_url})
+        data.setdefault("url", source_url or self.source_url)
+        data.setdefault("video", {"@type": "VideoObject", "url": source_url or self.source_url})
 
+        # Ensure valid date
         dp = data.get("datePublished")
         if not isinstance(dp, str) or len(dp) <= 10:
-            data["datePublished"] = datetime.now(
-                timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            data["datePublished"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-        self._clean_mealie_and_schema_lists(data)
+        # --- Clean and flatten recipeIngredients ---
+        ingredients = data.get("recipeIngredients") or []
+        clean = []
+        for i in ingredients:
+            if not isinstance(i, dict):
+                continue
+            food = " ".join(str(i.get("food", "")).split()).strip()
+            qty = " ".join(str(i.get("quantity", "")).split()).strip()
+            unit = " ".join(str(i.get("unit", "")).split()).strip()
+            note = " ".join(str(i.get("note", "")).split()).strip()
+            if not food:
+                continue
+            clean.append({"food": food, "quantity": qty, "unit": unit, "note": note})
+
+        # overwrite structured list
+        data["recipeIngredients"] = clean
+
+        # overwrite Schema.org recipeIngredient with a simple flattened list
+        flattened = []
+        for i in clean:
+            parts = [i["quantity"], i["unit"], i["food"], i["note"]]
+            line = " ".join(p for p in parts if p).strip().replace("–", "-")
+            if line:
+                flattened.append(line)
+        data["recipeIngredient"] = flattened
+
         return data
 
     def create_recipe(self, *, source_url: str | None = None) -> dict:
@@ -81,16 +135,12 @@ class Chef:
             "transcript": self.transcription,
         }
 
-        resp = self.client.responses.create(
-            model=self.model,
-            input=[
-                {"role": "system", "content": RECIPE_SYSTEM_PROMPT},
-                {"role": "user", "content": json.dumps(
-                    payload, ensure_ascii=False)},
-            ],
+        response_text = self._call_llm(
+            RECIPE_SYSTEM_PROMPT,
+            json.dumps(payload, ensure_ascii=False)
         )
 
-        data = json.loads(resp.output_text)
+        data = json.loads(response_text)
         recipe = self._postprocess_recipe(data, source_url)
         recipe = self._enrich_yield_and_nutrition(recipe)
         return recipe
@@ -112,19 +162,15 @@ class Chef:
             ]
         }
 
-        resp = self.client.responses.create(
-            model=self.model,
-            input=[
-                {"role": "system", "content": YIELD_NUTRITION_PROMPT},
-                {"role": "user", "content": json.dumps(
-                    payload, ensure_ascii=False)},
-            ],
+        response_text = self._call_llm(
+            YIELD_NUTRITION_PROMPT,
+            json.dumps(payload, ensure_ascii=False)
         )
         try:
-            est = json.loads(resp.output_text)
+            est = json.loads(response_text)
         except json.JSONDecodeError as e:
             raise RuntimeError(
-                f"Nutrition/servings estimation failed: {e}\nRaw:\n{resp.output_text}")
+                f"Nutrition/servings estimation failed: {e}\nRaw:\n{response_text}")
 
         # החלה מבוקרת:
         if need_yield:
