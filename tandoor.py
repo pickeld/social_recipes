@@ -295,24 +295,18 @@ class Tandoor:
         ingredients = self._build_ingredients(recipe_data, headers)
         steps = self._build_steps(recipe_data, headers)
 
-        # Tandoor expects ingredients inside steps. 
-        # If we have a single step or no steps, put all ingredients in first step
-        if ingredients:
-            if not steps:
-                # Create a default step with all instructions combined
-                combined_instructions = "\n".join(
-                    s.get("instruction", "") for s in self._build_steps(recipe_data, headers)
-                ) or description or "See ingredients."
-                steps = [{
-                    "instruction": combined_instructions,
-                    "ingredients": ingredients,
-                    "order": 0,
-                    "time": working_time + waiting_time,
-                    "name": "",
-                }]
-            else:
-                # Attach all ingredients to the first step
-                steps[0]["ingredients"] = ingredients
+        # Tandoor expects ingredients inside steps.
+        # Do NOT attach ingredients to steps - let Tandoor display them at recipe level only.
+        # If there are no steps, create a default one without ingredients embedded.
+        if not steps:
+            combined_instructions = description or "Follow the recipe instructions."
+            steps = [{
+                "instruction": combined_instructions,
+                "ingredients": [],
+                "order": 0,
+                "time": working_time + waiting_time,
+                "name": "",
+            }]
 
         payload = {
             "name": name,
