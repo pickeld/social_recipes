@@ -2,7 +2,13 @@ import os
 import yt_dlp
 
 
-class Tiktok:
+class VideoDownloader:
+    """Downloads and extracts metadata from videos using yt-dlp.
+    
+    Supports multiple video sources including TikTok, YouTube, Instagram, and others
+    supported by yt-dlp.
+    """
+    
     def __init__(self, url):
         self.url = url
         self.video_id = None
@@ -16,7 +22,7 @@ class Tiktok:
         return info
 
     def _download_video(self):
-        """Download the TikTok video to /tmp/<dish_id>/ folder."""
+        """Download the video to tmp/<video_id>/ folder."""
         dish_dir = os.path.join("tmp", self.video_id)
         video_path = os.path.join(dish_dir, f"{self.video_id}.mp4")
         os.makedirs(dish_dir, exist_ok=True)

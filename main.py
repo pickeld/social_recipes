@@ -4,18 +4,18 @@ import os
 from chef import Chef
 from config import config
 from mealie import Mealie
-from tiktok import Tiktok
+from video_downloader import VideoDownloader
 from transcriber import Transcriber
 from image_extractor import extract_dish_image
 
 
 def main(video_url: str):
-    tiktok = Tiktok(video_url)
-    item = tiktok._get_info()
+    downloader = VideoDownloader(video_url)
+    item = downloader._get_info()
     description = item.get("description", "No description available.")
     title = item.get("title", "Untitled")
 
-    vid_id, video_path = tiktok._download_video()
+    vid_id, video_path = downloader._download_video()
     dish_dir = os.path.join("tmp", vid_id)
     transcriber = Transcriber(video_path)
     lang = config.TARGET_LANGUAGE
@@ -82,10 +82,10 @@ def main(video_url: str):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Extract recipe from TikTok video")
+    parser = argparse.ArgumentParser(description="Extract recipe from video (supports TikTok, YouTube, Instagram, etc.)")
     parser.add_argument("url", nargs="?",
                         default="https://www.tiktok.com/@recipeincaption/video/7532985862854921477",
-                        help="TikTok video URL")
+                        help="Video URL (TikTok, YouTube, Instagram, etc.)")
     parser.add_argument("--no-upload", action="store_true",
                         help="Skip uploading to recipe manager (for testing)")
     args = parser.parse_args()
