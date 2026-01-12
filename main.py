@@ -69,7 +69,14 @@ if __name__ == "__main__":
                 transcription=results["transcription"])
 
     results = chef.create_recipe()
-    # if results:
-    #     mealie = Mealie()
-    #     mealie_recipe = mealie.create_recipe(results)
+    if not results:
+        print("No recipe created.")
+    else:
+        if config.OUTPUT_TARGET == "tandoor":
+            from tandoor import Tandoor
+            tandoor = Tandoor()
+            tandoor_recipe = tandoor.create_recipe(results)
+        elif config.OUTPUT_TARGET == "mealie":
+            mealie = Mealie()
+            mealie_recipe = mealie.create_recipe(results)
     print(results)
