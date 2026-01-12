@@ -17,9 +17,8 @@ class ImageExtractor:
 
     def __init__(self, video_path: str):
         self.video_path = video_path
-        base, _ = os.path.splitext(video_path)
-        self.frames_dir = f"{base}_frames"
-        self.output_dir = os.path.dirname(video_path) or "tmp"
+        self.dish_dir = os.path.dirname(video_path) or "tmp"
+        self.frames_dir = os.path.join(self.dish_dir, "dish_frames")
 
     def extract_best_image(self, num_candidates: int = 12) -> str | None:
         """
@@ -53,8 +52,7 @@ class ImageExtractor:
         best_frame = frames[best_frame_idx]
         
         # Copy to final output location with descriptive name
-        base, _ = os.path.splitext(self.video_path)
-        output_path = f"{base}_dish.jpg"
+        output_path = os.path.join(self.dish_dir, "dish.jpg")
         
         # Create high-quality version of the selected frame
         self._enhance_frame(best_frame, output_path)

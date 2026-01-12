@@ -16,11 +16,12 @@ def main(video_url: str):
     title = item.get("title", "Untitled")
 
     vid_id, video_path = tiktok._download_video()
+    dish_dir = os.path.join("tmp", vid_id)
     transcriber = Transcriber(video_path)
     lang = config.TARGET_LANGUAGE
     
     # Get audio transcription (cached with language in filename)
-    audio_cache = f"tmp/{vid_id}_{lang}.txt"
+    audio_cache = os.path.join(dish_dir, f"transcription_{lang}.txt")
     if os.path.exists(audio_cache):
         print(f"Using cached transcription ({lang}).")
         with open(audio_cache, "r") as f:
@@ -32,7 +33,7 @@ def main(video_url: str):
     
     # Get visual text from video (cached with language in filename)
     visual_text = ""
-    visual_cache = f"tmp/{vid_id}_{lang}_visual.txt"
+    visual_cache = os.path.join(dish_dir, f"visual_{lang}.txt")
     if os.path.exists(visual_cache):
         print(f"Using cached visual text ({lang}).")
         with open(visual_cache, "r") as f:
@@ -58,7 +59,7 @@ def main(video_url: str):
     
     # Extract best dish image from video (cached)
     image_path = None
-    image_cache = f"tmp/{vid_id}_dish.jpg"
+    image_cache = os.path.join(dish_dir, "dish.jpg")
     if os.path.exists(image_cache):
         print("Using cached dish image.")
         image_path = image_cache

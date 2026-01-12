@@ -21,8 +21,9 @@ class Transcriber:
         self.audio_path = self._get_audio_path()
 
     def _get_audio_path(self):
-        base, _ = os.path.splitext(self.video_path)
-        return f"{base}.wav"
+        # Store audio in the same dish folder as the video
+        dish_dir = os.path.dirname(self.video_path)
+        return os.path.join(dish_dir, "audio.wav")
 
     def _extract_audio(self, overwrite: bool = False):
         """Extract mono WAV audio at 16kHz using ffmpeg."""
@@ -162,8 +163,8 @@ class Transcriber:
 
     def _extract_frames(self, num_frames: int = 8) -> list[str]:
         """Extract evenly-spaced frames from video using ffmpeg."""
-        base, _ = os.path.splitext(self.video_path)
-        frames_dir = f"{base}_frames"
+        dish_dir = os.path.dirname(self.video_path)
+        frames_dir = os.path.join(dish_dir, "frames")
         os.makedirs(frames_dir, exist_ok=True)
 
         # Get video duration
