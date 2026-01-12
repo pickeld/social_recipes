@@ -1,6 +1,6 @@
 """
 Configuration module for Social Recipes.
-Reads configuration from SQLite database (with fallback to environment variables for backwards compatibility).
+Reads configuration from SQLite database with defaults for first run.
 """
 
 import os
@@ -64,76 +64,69 @@ def _get_config_from_db() -> dict:
 class Config:
     """Configuration class that reads from SQLite database.
 
-    Falls back to environment variables if database is not available,
-    allowing backwards compatibility with .env files.
+    Uses default values if database is not available or value is not set.
     """
 
     def __init__(self):
         self._db_config = _get_config_from_db()
 
-    def _get(self, key: str, env_var: str, default: str) -> str:
-        """Get config value with priority: env var > database > default."""
-        # Environment variable takes priority (allows runtime override)
-        env_value = os.getenv(env_var)
-        if env_value is not None:
-            return env_value
-        # Then check database
+    def _get(self, key: str, default: str) -> str:
+        """Get config value from database or default."""
         if key in self._db_config and self._db_config[key]:
             return self._db_config[key]
-        # Finally use default
         return default
 
     @property
     def LLM_PROVIDER(self) -> str:
-        return self._get('llm_provider', 'LLM_PROVIDER', DEFAULTS['llm_provider'])
+        return self._get('llm_provider', DEFAULTS['llm_provider'])
 
     @property
     def OPENAI_API_KEY(self) -> str:
-        return self._get('openai_api_key', 'OPENAI_API_KEY', DEFAULTS['openai_api_key'])
+        return self._get('openai_api_key', DEFAULTS['openai_api_key'])
 
     @property
     def OPENAI_MODEL(self) -> str:
-        return self._get('openai_model', 'OPENAI_MODEL', DEFAULTS['openai_model'])
+        return self._get('openai_model', DEFAULTS['openai_model'])
 
     @property
     def GEMINI_API_KEY(self) -> str:
-        return self._get('gemini_api_key', 'GEMINI_API_KEY', DEFAULTS['gemini_api_key'])
+        return self._get('gemini_api_key', DEFAULTS['gemini_api_key'])
 
     @property
     def GEMINI_MODEL(self) -> str:
-        return self._get('gemini_model', 'GEMINI_MODEL', DEFAULTS['gemini_model'])
+        return self._get('gemini_model', DEFAULTS['gemini_model'])
 
     @property
     def RECIPE_LANG(self) -> str:
-        return self._get('recipe_lang', 'RECIPE_LANG', DEFAULTS['recipe_lang'])
+        return self._get('recipe_lang', DEFAULTS['recipe_lang'])
 
     @property
     def MEALIE_API_KEY(self) -> str:
-        return self._get('mealie_api_key', 'MEALIE_API_KEY', DEFAULTS['mealie_api_key'])
+        return self._get('mealie_api_key', DEFAULTS['mealie_api_key'])
 
     @property
     def MEALIE_HOST(self) -> str:
-        return self._get('mealie_host', 'MEALIE_HOST', DEFAULTS['mealie_host'])
+        return self._get('mealie_host', DEFAULTS['mealie_host'])
 
     @property
     def TANDOOR_API_KEY(self) -> str:
-        return self._get('tandoor_api_key', 'TANDOOR_API_KEY', DEFAULTS['tandoor_api_key'])
+        return self._get('tandoor_api_key', DEFAULTS['tandoor_api_key'])
 
     @property
     def TANDOOR_HOST(self) -> str:
-        return self._get('tandoor_host', 'TANDOOR_HOST', DEFAULTS['tandoor_host'])
+        return self._get('tandoor_host', DEFAULTS['tandoor_host'])
 
     @property
     def TARGET_LANGUAGE(self) -> str:
-        return self._get('target_language', 'TARGET_LANGUAGE', DEFAULTS['target_language'])
+        return self._get('target_language', DEFAULTS['target_language'])
 
     @property
     def OUTPUT_TARGET(self) -> str:
-        return self._get('output_target', 'OUTPUT_TARGET', DEFAULTS['output_target'])
+        return self._get('output_target', DEFAULTS['output_target'])
 
     @property
     def WHISPER_MODEL(self) -> str:
-        return self._get('whisper_model', 'WHISPER_MODEL', DEFAULTS['whisper_model'])
+        return self._get('whisper_model', DEFAULTS['whisper_model'])
 
     def reload(self):
         """Reload configuration from database."""
