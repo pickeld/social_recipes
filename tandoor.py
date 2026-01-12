@@ -94,7 +94,7 @@ class Tandoor:
                 f"{self.base_url}/api/unit/",
                 headers=headers,
                 params={"page_size": 500},
-                timeout=15
+                timeout=30
             )
             if resp.status_code == 200:
                 data = resp.json()
@@ -114,7 +114,7 @@ class Tandoor:
                 f"{self.base_url}/api/food/",
                 headers=headers,
                 params={"page_size": 500},
-                timeout=15
+                timeout=30
             )
             if resp.status_code == 200:
                 data = resp.json()
@@ -146,7 +146,7 @@ class Tandoor:
                 search_url,
                 headers=headers,
                 params={"query": unit_name},
-                timeout=10
+                timeout=30
             )
             if resp.status_code == 200:
                 units = resp.json()
@@ -167,7 +167,7 @@ class Tandoor:
                 create_url,
                 json={"name": unit_name},
                 headers=headers,
-                timeout=10
+                timeout=30
             )
             if resp.status_code in (200, 201):
                 created = resp.json()
@@ -197,7 +197,7 @@ class Tandoor:
                 search_url,
                 headers=headers,
                 params={"query": food_name},
-                timeout=10
+                timeout=30
             )
             if resp.status_code == 200:
                 foods = resp.json()
@@ -218,7 +218,7 @@ class Tandoor:
                 create_url,
                 json={"name": food_name},
                 headers=headers,
-                timeout=10
+                timeout=30
             )
             if resp.status_code in (200, 201):
                 created = resp.json()
@@ -451,7 +451,7 @@ class Tandoor:
         print(f"[Tandoor] Creating recipe: {payload.get('name')}")
         print(f"[Tandoor] POST {create_url}")
 
-        resp = self._session.post(create_url, json=payload, headers=headers, timeout=30)
+        resp = self._session.post(create_url, json=payload, headers=headers, timeout=120)
         print(f"[Tandoor] Response status: {resp.status_code}")
 
         if resp.status_code >= 400:
