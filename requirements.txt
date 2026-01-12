@@ -3,3 +3,6 @@ faster_whisper
 openai
 python-dotenv
 requests
+flask
+flask-socketio
+eventlet
