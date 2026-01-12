@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - Social Recipes{% endblock %}
+
+{% block content %}
+<div class="settings-container">
+    <div class="settings-header">
+        <h1><i class="fas fa-cog"></i> Settings</h1>
+        <p>Configure your Social Recipes application</p>
+    </div>
+    
+    <form method="POST" action="{{ url_for('settings') }}" class="settings-form">
+        <!-- LLM Provider Settings -->
+        <div class="settings-section">
+            <h2><i class="fas fa-brain"></i> LLM Provider</h2>
+            
+            <div class="form-group">
+                <label for="llm_provider">Provider</label>
+                <select id="llm_provider" name="llm_provider" class="form-select">
+                    <option value="openai" {% if config.llm_provider == 'openai' %}selected{% endif %}>OpenAI</option>
+                    <option value="gemini" {% if config.llm_provider == 'gemini' %}selected{% endif %}>Google Gemini</option>
+                </select>
+            </div>
+            
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="openai_api_key">OpenAI API Key</label>
+                    <input type="password" id="openai_api_key" name="openai_api_key" 
+                           value="{{ config.openai_api_key }}" placeholder="sk-...">
+                </div>
+                <div class="form-group">
+                    <label for="openai_model">OpenAI Model</label>
+                    <input type="text" id="openai_model" name="openai_model" 
+                           value="{{ config.openai_model }}" placeholder="gpt-4">
+                </div>
+            </div>
+            
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="gemini_api_key">Gemini API Key</label>
+                    <input type="password" id="gemini_api_key" name="gemini_api_key" 
+                           value="{{ config.gemini_api_key }}" placeholder="AIza...">
+                </div>
+                <div class="form-group">
+                    <label for="gemini_model">Gemini Model</label>
+                    <input type="text" id="gemini_model" name="gemini_model" 
+                           value="{{ config.gemini_model }}" placeholder="gemini-2.0-flash">
+                </div>
+            </div>
+        </div>
+        
+        <!-- Recipe Output Settings -->
+        <div class="settings-section">
+            <h2><i class="fas fa-utensils"></i> Recipe Output</h2>
+            
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="output_target">Output Target</label>
+                    <select id="output_target" name="output_target" class="form-select">
+                        <option value="tandoor" {% if config.output_target == 'tandoor' %}selected{% endif %}>Tandoor</option>
+                        <option value="mealie" {% if config.output_target == 'mealie' %}selected{% endif %}>Mealie</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="recipe_lang">Recipe Language</label>
+                    <input type="text" id="recipe_lang" name="recipe_lang" 
+                           value="{{ config.recipe_lang }}" placeholder="hebrew">
+                </div>
+                <div class="form-group">
+                    <label for="target_language">Target Language Code</label>
+                    <input type="text" id="target_language" name="target_language" 
+                           value="{{ config.target_language }}" placeholder="he">
+                </div>
+            </div>
+        </div>
+        
+        <!-- Mealie Settings -->
+        <div class="settings-section">
+            <h2><i class="fas fa-server"></i> Mealie</h2>
+            
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="mealie_host">Mealie URL</label>
+                    <input type="url" id="mealie_host" name="mealie_host" 
+                           value="{{ config.mealie_host }}" placeholder="http://localhost:9925">
+                </div>
+                <div class="form-group">
+                    <label for="mealie_api_key">Mealie API Key</label>
+                    <input type="password" id="mealie_api_key" name="mealie_api_key" 
+                           value="{{ config.mealie_api_key }}" placeholder="Your Mealie API key">
+                </div>
+            </div>
+        </div>
+        
+        <!-- Tandoor Settings -->
+        <div class="settings-section">
+            <h2><i class="fas fa-cloud"></i> Tandoor</h2>
+            
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="tandoor_host">Tandoor URL</label>
+                    <input type="url" id="tandoor_host" name="tandoor_host" 
+                           value="{{ config.tandoor_host }}" placeholder="https://tandoor.example.com">
+                </div>
+                <div class="form-group">
+                    <label for="tandoor_api_key">Tandoor API Key</label>
+                    <input type="password" id="tandoor_api_key" name="tandoor_api_key" 
+                           value="{{ config.tandoor_api_key }}" placeholder="Your Tandoor API key">
+                </div>
+            </div>
+        </div>
+        
+        <!-- Whisper Settings -->
+        <div class="settings-section">
+            <h2><i class="fas fa-microphone"></i> Whisper Transcription</h2>
+            
+            <div class="form-group">
+                <label for="whisper_model">Whisper Model</label>
+                <select id="whisper_model" name="whisper_model" class="form-select">
+                    <option value="tiny" {% if config.whisper_model == 'tiny' %}selected{% endif %}>Tiny (fastest, least accurate)</option>
+                    <option value="base" {% if config.whisper_model == 'base' %}selected{% endif %}>Base</option>
+                    <option value="small" {% if config.whisper_model == 'small' %}selected{% endif %}>Small (recommended)</option>
+                    <option value="medium" {% if config.whisper_model == 'medium' %}selected{% endif %}>Medium</option>
+                    <option value="large-v3" {% if config.whisper_model == 'large-v3' %}selected{% endif %}>Large v3 (slowest, most accurate)</option>
+                </select>
+                <small class="form-hint">Larger models are more accurate but slower. 'Small' is recommended for mixed-language content.</small>
+            </div>
+        </div>
+        
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">
+                <i class="fas fa-save"></i>
+                Save Settings
+            </button>
+        </div>
+    </form>
+    
+    <!-- Change Password Section -->
+    <div class="settings-section password-section">
+        <h2><i class="fas fa-key"></i> Change Password</h2>
+        
+        <form method="POST" action="{{ url_for('change_password') }}" class="password-form">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="current_password">Current Password</label>
+                    <input type="password" id="current_password" name="current_password" required>
+                </div>
+                <div class="form-group">
+                    <label for="new_password">New Password</label>
+                    <input type="password" id="new_password" name="new_password" required minlength="6">
+                </div>
+                <div class="form-group">
+                    <label for="confirm_password">Confirm New Password</label>
+                    <input type="password" id="confirm_password" name="confirm_password" required minlength="6">
+                </div>
+            </div>
+            
+            <button type="submit" class="btn btn-secondary">
+                <i class="fas fa-key"></i>
+                Change Password
+            </button>
+        </form>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}Login - Social Recipes{% endblock %}
+
+{% block content %}
+<div class="login-container">
+    <div class="login-card">
+        <div class="login-header">
+            <i class="fas fa-utensils logo-icon"></i>
+            <h1>Social Recipes</h1>
+            <p>Extract recipes from social media videos</p>
+        </div>
+        
+        <form method="POST" action="{{ url_for('login') }}" class="login-form">
+            <div class="form-group">
+                <label for="username">
+                    <i class="fas fa-user"></i>
+                    Username
+                </label>
+                <input type="text" id="username" name="username" required autofocus 
+                       placeholder="Enter your username">
+            </div>
+            
+            <div class="form-group">
+                <label for="password">
+                    <i class="fas fa-lock"></i>
+                    Password
+                </label>
+                <input type="password" id="password" name="password" required
+                       placeholder="Enter your password">
+            </div>
+            
+            <button type="submit" class="btn btn-primary btn-block">
+                <i class="fas fa-sign-in-alt"></i>
+                Login
+            </button>
+        </form>
+        
+        <div class="login-footer">
+            <p class="hint">Default credentials: admin / admin123</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
