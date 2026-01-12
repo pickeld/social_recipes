@@ -53,6 +53,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     
     socket.on('recipe_preview', function(data) {
+        console.log('Received recipe_preview event:', data);
         showPreviewModal(data);
     });
     
@@ -359,7 +360,11 @@ document.addEventListener('DOMContentLoaded', function() {
      * Show recipe preview modal
      */
     function showPreviewModal(data) {
-        if (!previewModal) return;
+        console.log('showPreviewModal called, previewModal element:', previewModal);
+        if (!previewModal) {
+            console.error('Preview modal element not found!');
+            return;
+        }
         
         currentUploadId = data.upload_id;
         

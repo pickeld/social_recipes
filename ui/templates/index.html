@@ -81,7 +81,9 @@
         </button>
     </div>
 </div>
+{% endblock %}
 
+{% block modals %}
 <!-- Recipe Preview Modal -->
 <div class="modal-overlay" id="preview-modal" style="display: none;">
     <div class="modal-container">
@@ -126,5 +128,5 @@
 {% endblock %}
 
 {% block extra_scripts %}
-<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+<script src="{{ url_for('static', filename='js/main.js') }}?v=2"></script>
 {% endblock %}

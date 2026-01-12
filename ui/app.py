@@ -288,6 +288,7 @@ def process_video_task(url):
                 'image_data': image_data,
                 'output_target': config.OUTPUT_TARGET
             })
+            eventlet.sleep(0.1)  # Small delay to ensure emit is sent
             
             # Wait for user response (with timeout)
             try:
