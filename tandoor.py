@@ -30,9 +30,6 @@ class Tandoor:
     def __init__(self):
         self.api_key = config.TANDOOR_API_KEY
         self.base_url = config.TANDOOR_HOST.rstrip("/")
-        # Caches to avoid repeated API calls for same units/foods
-        self._unit_cache = {}  # name.lower() -> id
-        self._food_cache = {}  # name.lower() -> id
         # Use a session for connection reuse
         self._session = _create_session()
 
@@ -83,157 +80,10 @@ class Tandoor:
                 pass
         return 1
 
-    def _preload_caches(self, headers: dict) -> None:
-        """
-        Preload unit and food caches with existing items from Tandoor.
-        This reduces API calls by fetching all items at once.
-        """
-        # Preload units (usually a small list)
-        try:
-            resp = self._session.get(
-                f"{self.base_url}/api/unit/",
-                headers=headers,
-                params={"page_size": 500},
-                timeout=30
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                units = data.get("results", []) if isinstance(
-                    data, dict) else data
-                for u in units:
-                    if isinstance(u, dict) and u.get("name") and u.get("id"):
-                        self._unit_cache[u["name"].lower()] = u["id"]
-                print(
-                    f"[Tandoor] Preloaded {len(self._unit_cache)} units into cache")
-        except Exception as e:
-            print(f"[Tandoor] Failed to preload units: {e}")
-
-        # Preload foods (could be a larger list)
-        try:
-            resp = self._session.get(
-                f"{self.base_url}/api/food/",
-                headers=headers,
-                params={"page_size": 500},
-                timeout=30
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                foods = data.get("results", []) if isinstance(
-                    data, dict) else data
-                for f in foods:
-                    if isinstance(f, dict) and f.get("name") and f.get("id"):
-                        self._food_cache[f["name"].lower()] = f["id"]
-                print(
-                    f"[Tandoor] Preloaded {len(self._food_cache)} foods into cache")
-        except Exception as e:
-            print(f"[Tandoor] Failed to preload foods: {e}")
-
-    def _get_or_create_unit(self, unit_name: str, headers: dict) -> int | None:
-        """Get existing unit ID or create new one. Returns unit ID or None. Uses cache."""
-        if not unit_name:
-            return None
-
-        cache_key = unit_name.lower()
-
-        # Check cache first
-        if cache_key in self._unit_cache:
-            return self._unit_cache[cache_key]
-
-        # Search for existing unit
-        search_url = f"{self.base_url}/api/unit/"
-        try:
-            resp = self._session.get(
-                search_url,
-                headers=headers,
-                params={"query": unit_name},
-                timeout=30
-            )
-            if resp.status_code == 200:
-                units = resp.json()
-                if isinstance(units, dict) and "results" in units:
-                    units = units["results"]
-                for u in units:
-                    if isinstance(u, dict) and u.get("name", "").lower() == cache_key:
-                        unit_id = u.get("id")
-                        self._unit_cache[cache_key] = unit_id
-                        return unit_id
-        except Exception as e:
-            print(f"[Tandoor] Unit search error: {e}")
-
-        # Create new unit
-        create_url = f"{self.base_url}/api/unit/"
-        try:
-            resp = self._session.post(
-                create_url,
-                json={"name": unit_name},
-                headers=headers,
-                timeout=30
-            )
-            if resp.status_code in (200, 201):
-                created = resp.json()
-                unit_id = created.get("id")
-                self._unit_cache[cache_key] = unit_id
-                return unit_id
-        except Exception as e:
-            print(f"[Tandoor] Unit create error: {e}")
-
-        return None
-
-    def _get_or_create_food(self, food_name: str, headers: dict) -> int | None:
-        """Get existing food ID or create new one. Returns food ID or None. Uses cache."""
-        if not food_name:
-            return None
-
-        cache_key = food_name.lower()
-
-        # Check cache first
-        if cache_key in self._food_cache:
-            return self._food_cache[cache_key]
-
-        # Search for existing food
-        search_url = f"{self.base_url}/api/food/"
-        try:
-            resp = self._session.get(
-                search_url,
-                headers=headers,
-                params={"query": food_name},
-                timeout=30
-            )
-            if resp.status_code == 200:
-                foods = resp.json()
-                if isinstance(foods, dict) and "results" in foods:
-                    foods = foods["results"]
-                for f in foods:
-                    if isinstance(f, dict) and f.get("name", "").lower() == cache_key:
-                        food_id = f.get("id")
-                        self._food_cache[cache_key] = food_id
-                        return food_id
-        except Exception as e:
-            print(f"[Tandoor] Food search error: {e}")
-
-        # Create new food
-        create_url = f"{self.base_url}/api/food/"
-        try:
-            resp = self._session.post(
-                create_url,
-                json={"name": food_name},
-                headers=headers,
-                timeout=30
-            )
-            if resp.status_code in (200, 201):
-                created = resp.json()
-                food_id = created.get("id")
-                self._food_cache[cache_key] = food_id
-                return food_id
-        except Exception as e:
-            print(f"[Tandoor] Food create error: {e}")
-
-        return None
-
-    def _build_ingredients(self, recipe_data: dict, headers: dict) -> list[dict]:
+    def _build_ingredients(self, recipe_data: dict) -> list[dict]:
         """
         Build Tandoor ingredient list from recipe data.
-        Tandoor expects: { amount, unit (id + name), food (id + name), note, order }
+        Tandoor will auto-create units and foods when given just names (no IDs needed).
         """
         ingredients = []
         order = 0
@@ -266,16 +116,10 @@ class Tandoor:
                 note = " | ".join([p for p in note_parts if p]) or None
 
                 amount = self._coerce_num(qty_s)
-                unit_id = self._get_or_create_unit(
-                    unit_name, headers) if unit_name else None
-                food_id = self._get_or_create_food(
-                    food_name, headers) if food_name else None
-
-                # Tandoor requires both id and name for unit/food objects
-                unit_obj = {"id": unit_id,
-                            "name": unit_name} if unit_id and unit_name else None
-                food_obj = {"id": food_id,
-                            "name": food_name} if food_id and food_name else None
+                
+                # Tandoor auto-creates units/foods when given just the name
+                unit_obj = {"name": unit_name} if unit_name else None
+                food_obj = {"name": food_name} if food_name else None
 
                 ingredient = {
                     "amount": amount,
@@ -300,25 +144,17 @@ class Tandoor:
                     r"^\s*(\d+(?:[.,]\d+)?)\s*([^\s]+)?\s+(.*)$", raw
                 )
                 amount = 0
-                unit_id = None
                 unit_name = ""
-                food_id = None
                 food_name = ""
 
                 if m2:
                     amount = self._coerce_num(m2.group(1))
                     unit_name = (m2.group(2) or "").strip()
                     food_name = (m2.group(3) or "").strip()
-                    if unit_name:
-                        unit_id = self._get_or_create_unit(unit_name, headers)
-                    if food_name:
-                        food_id = self._get_or_create_food(food_name, headers)
 
-                # Tandoor requires both id and name for unit/food objects
-                unit_obj = {"id": unit_id,
-                            "name": unit_name} if unit_id and unit_name else None
-                food_obj = {"id": food_id,
-                            "name": food_name} if food_id and food_name else None
+                # Tandoor auto-creates units/foods when given just the name
+                unit_obj = {"name": unit_name} if unit_name else None
+                food_obj = {"name": food_name} if food_name else None
 
                 ingredient = {
                     "amount": amount,
@@ -332,7 +168,7 @@ class Tandoor:
 
         return ingredients
 
-    def _build_steps(self, recipe_data: dict, headers: dict) -> list[dict]:
+    def _build_steps(self, recipe_data: dict) -> list[dict]:
         """
         Build Tandoor step list from recipe instructions.
         Tandoor expects: { instruction, ingredients (list), order, time, name }
@@ -361,7 +197,7 @@ class Tandoor:
 
         return steps
 
-    def _to_tandoor_payload(self, recipe_data: dict, headers: dict) -> dict:
+    def _to_tandoor_payload(self, recipe_data: dict) -> dict:
         """
         Map Schema.org style recipe into Tandoor API expected fields.
         Tandoor recipe structure:
@@ -398,12 +234,9 @@ class Tandoor:
         source_url = recipe_data.get(
             "url") or recipe_data.get("source_url") or ""
 
-        # Preload caches to reduce API calls (2 requests instead of N*2)
-        self._preload_caches(headers)
-
-        # Build ingredients and steps
-        ingredients = self._build_ingredients(recipe_data, headers)
-        steps = self._build_steps(recipe_data, headers)
+        # Build ingredients and steps (no API calls needed - Tandoor auto-creates units/foods)
+        ingredients = self._build_ingredients(recipe_data)
+        steps = self._build_steps(recipe_data)
 
         # Tandoor requires ingredients to be attached to steps.
         # If there are no steps, create a default one.
@@ -436,8 +269,11 @@ class Tandoor:
 
     def create_recipe(self, recipe_data: dict) -> dict:
         """
-        Create a recipe in Tandoor.
+        Create a recipe in Tandoor with a single API call.
         POST /api/recipe/
+        
+        Tandoor automatically creates units and foods when given just names,
+        so no pre-creation API calls are needed.
         """
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -445,7 +281,7 @@ class Tandoor:
             "Accept": "application/json",
         }
 
-        payload = self._to_tandoor_payload(recipe_data, headers)
+        payload = self._to_tandoor_payload(recipe_data)
         create_url = f"{self.base_url}/api/recipe/"
 
         print(f"[Tandoor] Creating recipe: {payload.get('name')}")
