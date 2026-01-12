@@ -17,8 +17,21 @@ document.addEventListener('DOMContentLoaded', function() {
     const recipePreview = document.getElementById('recipe-preview');
     const newRecipeBtn = document.getElementById('new-recipe-btn');
     
+    // Preview Modal Elements
+    const previewModal = document.getElementById('preview-modal');
+    const previewTarget = document.getElementById('preview-target');
+    const previewImageContainer = document.getElementById('preview-image-container');
+    const previewImage = document.getElementById('preview-image');
+    const previewTitle = document.getElementById('preview-title');
+    const previewDescription = document.getElementById('preview-description');
+    const previewIngredients = document.getElementById('preview-ingredients');
+    const previewInstructions = document.getElementById('preview-instructions');
+    const confirmUploadBtn = document.getElementById('confirm-upload-btn');
+    const cancelUploadBtn = document.getElementById('cancel-upload-btn');
+    
     // Track current processing state
     let isProcessing = false;
+    let currentUploadId = null;
     
     // Socket.IO event handlers
     socket.on('connect', function() {
@@ -39,6 +52,16 @@ document.addEventListener('DOMContentLoaded', function() {
         displayRecipe(data.recipe);
     });
     
+    socket.on('recipe_preview', function(data) {
+        showPreviewModal(data);
+    });
+    
+    socket.on('recipe_cancelled', function(data) {
+        hidePreviewModal();
+        showNotification(data.message || 'Upload cancelled', 'info');
+        resetProcessingState();
+    });
+    
     // Process button click handler
     if (processBtn) {
         processBtn.addEventListener('click', startProcessing);
@@ -56,6 +79,27 @@ document.addEventListener('DOMContentLoaded', function() {
     // New recipe button click handler
     if (newRecipeBtn) {
         newRecipeBtn.addEventListener('click', resetUI);
+    }
+    
+    // Preview modal button handlers
+    if (confirmUploadBtn) {
+        confirmUploadBtn.addEventListener('click', function() {
+            if (currentUploadId) {
+                socket.emit('confirm_upload', { upload_id: currentUploadId });
+                hidePreviewModal();
+                addLog('info', 'Upload confirmed, uploading recipe...');
+            }
+        });
+    }
+    
+    if (cancelUploadBtn) {
+        cancelUploadBtn.addEventListener('click', function() {
+            if (currentUploadId) {
+                socket.emit('cancel_upload', { upload_id: currentUploadId });
+                hidePreviewModal();
+                addLog('warning', 'Upload cancelled by user');
+            }
+        });
     }
     
     /**
@@ -143,7 +187,14 @@ document.addEventListener('DOMContentLoaded', function() {
      */
     function updateStepIndicators(currentStage, percent) {
         const stages = ['info', 'download', 'transcribe', 'visual', 'image', 'evaluate', 'upload'];
-        const currentIndex = stages.indexOf(currentStage);
+        
+        // Map 'preview' stage to 'upload' for display purposes (preview happens before upload)
+        let displayStage = currentStage;
+        if (currentStage === 'preview') {
+            displayStage = 'upload';
+        }
+        
+        const currentIndex = stages.indexOf(displayStage);
         
         stages.forEach((stage, index) => {
             const stepElement = document.getElementById('step-' + stage);
@@ -155,6 +206,11 @@ document.addEventListener('DOMContentLoaded', function() {
             if (currentStage === 'error') {
                 if (index === currentIndex || index < currentIndex) {
                     stepElement.classList.add('error');
+                }
+            } else if (currentStage === 'cancelled') {
+                // Mark all steps up to current as completed, but show as cancelled
+                if (index < currentIndex) {
+                    stepElement.classList.add('completed');
                 }
             } else if (currentStage === 'complete') {
                 stepElement.classList.add('completed');
@@ -297,6 +353,79 @@ document.addEventListener('DOMContentLoaded', function() {
         container.className = 'flash-messages';
         document.body.appendChild(container);
         return container;
+    }
+    
+    /**
+     * Show recipe preview modal
+     */
+    function showPreviewModal(data) {
+        if (!previewModal) return;
+        
+        currentUploadId = data.upload_id;
+        
+        // Set target name
+        if (previewTarget) {
+            previewTarget.textContent = data.output_target || 'recipe manager';
+        }
+        
+        // Set recipe image if available
+        if (data.image_data && previewImage && previewImageContainer) {
+            previewImage.src = 'data:image/jpeg;base64,' + data.image_data;
+            previewImageContainer.style.display = 'block';
+        } else if (previewImageContainer) {
+            previewImageContainer.style.display = 'none';
+        }
+        
+        // Set recipe title
+        if (previewTitle) {
+            previewTitle.textContent = data.recipe.name || 'Untitled Recipe';
+        }
+        
+        // Set recipe description
+        if (previewDescription) {
+            previewDescription.textContent = data.recipe.description || '';
+        }
+        
+        // Set ingredients
+        if (previewIngredients) {
+            previewIngredients.innerHTML = '';
+            if (data.recipe.recipeIngredient && data.recipe.recipeIngredient.length > 0) {
+                data.recipe.recipeIngredient.forEach(ing => {
+                    const li = document.createElement('li');
+                    li.textContent = ing;
+                    previewIngredients.appendChild(li);
+                });
+            }
+        }
+        
+        // Set instructions
+        if (previewInstructions) {
+            previewInstructions.innerHTML = '';
+            if (data.recipe.recipeInstructions && data.recipe.recipeInstructions.length > 0) {
+                data.recipe.recipeInstructions.forEach(inst => {
+                    const li = document.createElement('li');
+                    li.textContent = typeof inst === 'object' ? inst.text : inst;
+                    previewInstructions.appendChild(li);
+                });
+            }
+        }
+        
+        // Show modal
+        previewModal.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+        
+        addLog('info', 'Recipe preview ready - please confirm or cancel upload');
+    }
+    
+    /**
+     * Hide recipe preview modal
+     */
+    function hidePreviewModal() {
+        if (previewModal) {
+            previewModal.style.display = 'none';
+            document.body.style.overflow = '';
+        }
+        currentUploadId = null;
     }
     
     /**
