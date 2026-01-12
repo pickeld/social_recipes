@@ -2,18 +2,38 @@ from config import config
 import re
 import os
 import sys
+import threading
 
 # Use requests.Session for connection reuse and better eventlet compatibility
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-# Increase recursion limit to handle eventlet + SSL edge cases
-# This is needed because eventlet's monkey-patching can cause deep call stacks
-# when combined with requests/urllib3's SSL handling
-_original_limit = sys.getrecursionlimit()
-if _original_limit < 2000:
-    sys.setrecursionlimit(2000)
+
+def _is_eventlet_patched() -> bool:
+    """
+    Check if eventlet has monkey-patched the socket module.
+    This is checked at runtime because the patch may happen after this module is imported.
+    """
+    try:
+        import eventlet.patcher
+        return eventlet.patcher.is_monkey_patched('socket')
+    except (ImportError, AttributeError):
+        pass
+    
+    # Fallback: check socket module directly
+    try:
+        import socket
+        # eventlet patches socket.socket with its own GreenSocket class
+        socket_class_str = str(type(socket.socket))
+        if 'eventlet' in socket_class_str.lower() or 'green' in socket_class_str.lower():
+            return True
+        if hasattr(socket.socket, '__module__') and 'eventlet' in str(socket.socket.__module__):
+            return True
+    except Exception:
+        pass
+    
+    return False
 
 
 def _create_session() -> requests.Session:
@@ -30,23 +50,123 @@ def _create_session() -> requests.Session:
     return session
 
 
-def _safe_request(method: str, url: str, session: requests.Session, **kwargs) -> requests.Response:
+# Thread-local storage for native thread sessions (used when running under eventlet)
+_thread_local = threading.local()
+
+
+def _get_native_session() -> requests.Session:
+    """
+    Get or create a requests session for the current native thread.
+    This ensures each native thread has its own session, avoiding eventlet contamination.
+    """
+    if not hasattr(_thread_local, 'session'):
+        _thread_local.session = _create_session()
+    return _thread_local.session
+
+
+def _do_request_in_native_thread(method: str, url: str, headers: dict | None,
+                                  json_data: dict | None, params: dict | None,
+                                  files: tuple | None, timeout: int) -> tuple:
+    """
+    Execute HTTP request in a native OS thread.
+    This function creates its own session to avoid eventlet-patched objects.
+    Returns a tuple of (status_code, response_text, response_json_or_none).
+    """
+    session = _get_native_session()
+    
+    kwargs = {}
+    if headers:
+        kwargs['headers'] = headers
+    if json_data is not None:
+        kwargs['json'] = json_data
+    if params:
+        kwargs['params'] = params
+    if timeout:
+        kwargs['timeout'] = timeout
+    
+    # Handle file uploads specially - files need to be re-opened in this thread
+    if files:
+        file_path, file_name, content_type = files
+        with open(file_path, 'rb') as f:
+            kwargs['files'] = {'image': (file_name, f, content_type)}
+            resp = getattr(session, method)(url, **kwargs)
+    else:
+        resp = getattr(session, method)(url, **kwargs)
+    
+    # Extract response data to simple types that can be safely passed back
+    try:
+        json_result = resp.json()
+    except Exception:
+        json_result = None
+    
+    return (resp.status_code, resp.text, json_result)
+
+
+class _ResponseWrapper:
+    """Simple wrapper to mimic requests.Response for compatibility."""
+    def __init__(self, status_code: int, text: str, json_data):
+        self.status_code = status_code
+        self.text = text
+        self._json_data = json_data
+    
+    def json(self):
+        if self._json_data is None:
+            raise ValueError("No JSON data available")
+        return self._json_data
+    
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"HTTP {self.status_code}: {self.text[:500]}")
+
+
+def _safe_request(method: str, url: str, session: requests.Session, **kwargs):
     """
     Execute HTTP request with eventlet compatibility.
     Uses tpool if running under eventlet to avoid recursion issues with SSL.
+    
+    Returns: requests.Response or _ResponseWrapper (duck-typed compatible)
     """
-    try:
-        # Check if eventlet is active (has monkey-patched the socket module)
-        import eventlet
-        from eventlet import tpool
-        # Run the request in a native thread to avoid eventlet SSL recursion issues
-        return tpool.execute(getattr(session, method), url, **kwargs)
-    except ImportError:
-        # eventlet not available, use regular request
-        return getattr(session, method)(url, **kwargs)
-    except Exception as e:
-        # If tpool fails for any reason, fall back to regular request
-        # but with increased recursion limit already set above
+    if _is_eventlet_patched():
+        try:
+            from eventlet import tpool
+            
+            # Extract only primitive/simple types to pass to native thread
+            headers = kwargs.get('headers')
+            json_data = kwargs.get('json')
+            params = kwargs.get('params')
+            timeout = kwargs.get('timeout', 30)
+            
+            # Handle files specially - pass path info, not file objects
+            files = None
+            if 'files' in kwargs:
+                file_dict = kwargs['files']
+                if 'image' in file_dict:
+                    img_tuple = file_dict['image']
+                    # img_tuple is (filename, file_obj, content_type)
+                    # We need to get the file path - it should have been passed differently
+                    # For now, extract what we can
+                    file_name = img_tuple[0]
+                    content_type = img_tuple[2] if len(img_tuple) > 2 else 'image/jpeg'
+                    # The file object's name attribute should give us the path
+                    file_obj = img_tuple[1]
+                    if hasattr(file_obj, 'name'):
+                        file_path = file_obj.name
+                        files = (file_path, file_name, content_type)
+            
+            # Run the request in a native thread
+            result = tpool.execute(
+                _do_request_in_native_thread,
+                method, url, headers, json_data, params, files, timeout
+            )  # type: ignore
+            
+            return _ResponseWrapper(result[0], result[1], result[2])
+            
+        except Exception as e:
+            # Log the tpool failure and raise it
+            print(f"[Tandoor] tpool.execute failed: {e}")
+            raise
+    else:
+        # eventlet not patched, use regular request
         return getattr(session, method)(url, **kwargs)
 
 
