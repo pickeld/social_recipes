@@ -25,7 +25,8 @@ DEFAULTS = {
     "tandoor_host": "https://tandoor.pickel.me",
     "target_language": "he",
     "output_target": "tandoor",
-    "whisper_model": "small"
+    "whisper_model": "small",
+    "confirm_before_upload": "true"
 }
 
 
@@ -127,6 +128,11 @@ class Config:
     @property
     def WHISPER_MODEL(self) -> str:
         return self._get('whisper_model', DEFAULTS['whisper_model'])
+
+    @property
+    def CONFIRM_BEFORE_UPLOAD(self) -> bool:
+        value = self._get('confirm_before_upload', DEFAULTS['confirm_before_upload'])
+        return value.lower() in ('true', '1', 'yes', 'on')
 
     def reload(self):
         """Reload configuration from database."""

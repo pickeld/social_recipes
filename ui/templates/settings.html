@@ -127,6 +127,20 @@
             </div>
         </div>
         
+        <!-- Upload Settings -->
+        <div class="settings-section">
+            <h2><i class="fas fa-upload"></i> Upload Settings</h2>
+            
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="confirm_before_upload" name="confirm_before_upload"
+                           {% if config.confirm_before_upload == 'true' %}checked{% endif %}>
+                    <span class="checkbox-text">Confirm before uploading</span>
+                </label>
+                <small class="form-hint">When enabled, you'll see a preview of the recipe and must confirm before it's uploaded to Tandoor or Mealie.</small>
+            </div>
+        </div>
+        
         <div class="form-actions">
             <button type="submit" class="btn btn-primary">
                 <i class="fas fa-save"></i>

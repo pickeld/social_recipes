@@ -25,7 +25,8 @@ DEFAULT_CONFIG = {
     "tandoor_host": "https://tandoor.pickel.me",
     "target_language": "he",
     "output_target": "tandoor",
-    "whisper_model": "small"
+    "whisper_model": "small",
+    "confirm_before_upload": "true"
 }
 
 

@@ -3,14 +3,16 @@ Social Recipes Web UI
 A Flask-based web interface for video recipe extraction with authentication and configuration management.
 """
 
-from database import (
-    init_db, load_config, save_config,
-    verify_user, update_password, hash_password
-)
+# Monkey-patch for async support - MUST be at the very top before other imports
+import eventlet
+eventlet.monkey_patch()
+
 import os
 import sys
 import secrets
+import base64
 from functools import wraps
+from dotenv import load_dotenv
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
 from flask_socketio import SocketIO, emit
 
@@ -18,13 +20,21 @@ from flask_socketio import SocketIO, emit
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import database module
+from database import (
+    init_db, load_config, save_config,
+    verify_user, update_password, hash_password
+)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', secrets.token_hex(32))
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 # Initialize database
 init_db()
+
+# Store pending recipe uploads waiting for confirmation
+# Key: session_id, Value: {'recipe': recipe_data, 'image_path': path, 'event': eventlet.event.Event(), 'confirmed': bool}
+pending_uploads = {}
 
 
 def login_required(f):
@@ -90,6 +100,8 @@ def settings():
         config['target_language'] = request.form.get('target_language', 'he')
         config['output_target'] = request.form.get('output_target', 'tandoor')
         config['whisper_model'] = request.form.get('whisper_model', 'small')
+        # Checkbox: present in form data only when checked
+        config['confirm_before_upload'] = 'true' if request.form.get('confirm_before_upload') else 'false'
 
         save_config(config)
         flash('Settings saved successfully!', 'success')
@@ -151,6 +163,7 @@ def process_video_task(url):
 
         # Step 1: Get video info
         emit_progress('info', 'Fetching video information...', 10)
+        eventlet.sleep(0)  # Yield to event loop
         downloader = VideoDownloader(url)
         item = downloader._get_info()
         description = item.get("description", "No description available.")
@@ -159,6 +172,7 @@ def process_video_task(url):
 
         # Step 2: Download video
         emit_progress('download', 'Downloading video...', 20)
+        eventlet.sleep(0)  # Yield to event loop
         vid_id, video_path = downloader._download_video()
         if vid_id is None:
             emit_progress('error', 'Failed to download video', 100)
@@ -168,6 +182,7 @@ def process_video_task(url):
 
         # Step 3: Transcribe audio
         emit_progress('transcribe', 'Transcribing audio...', 35)
+        eventlet.sleep(0)  # Yield to event loop
         transcriber = Transcriber(video_path)
         lang = config.TARGET_LANGUAGE
 
@@ -178,12 +193,14 @@ def process_video_task(url):
                 transcription = f.read()
         else:
             transcription = transcriber.transcribe()
+            eventlet.sleep(0)  # Yield after CPU-intensive transcription
             with open(audio_cache, "w") as f:
                 f.write(transcription)
         emit_progress('transcribe', 'Audio transcribed', 50)
 
         # Step 4: Extract visual text
         emit_progress('visual', 'Extracting on-screen text...', 55)
+        eventlet.sleep(0)  # Yield to event loop
         visual_text = ""
         visual_cache = os.path.join(dish_dir, f"visual_{lang}.txt")
         if os.path.exists(visual_cache):
@@ -193,6 +210,7 @@ def process_video_task(url):
         else:
             try:
                 visual_text = transcriber.extract_visual_text()
+                eventlet.sleep(0)  # Yield after LLM call
                 with open(visual_cache, "w") as f:
                     f.write(visual_text)
             except Exception as e:
@@ -211,6 +229,7 @@ def process_video_task(url):
 
         # Step 5: Extract dish image
         emit_progress('image', 'Extracting dish image...', 70)
+        eventlet.sleep(0)  # Yield to event loop
         image_path = None
         image_cache = os.path.join(dish_dir, "dish.jpg")
         if os.path.exists(image_cache):
@@ -219,6 +238,7 @@ def process_video_task(url):
         else:
             try:
                 image_path = extract_dish_image(video_path)
+                eventlet.sleep(0)  # Yield after image extraction
             except Exception as e:
                 emit_progress(
                     'image', f'Warning: Could not extract image: {e}', 75)
@@ -226,9 +246,11 @@ def process_video_task(url):
 
         # Step 6: Create recipe with AI
         emit_progress('evaluate', 'Creating recipe with AI...', 85)
+        eventlet.sleep(0)  # Yield to event loop
         chef = Chef(source_url=url, description=description,
                     transcription=combined_transcription)
         recipe_data = chef.create_recipe()
+        eventlet.sleep(0)  # Yield after LLM call
 
         if not recipe_data:
             emit_progress('error', 'Failed to create recipe', 100)
@@ -236,8 +258,59 @@ def process_video_task(url):
 
         emit_progress('evaluate', 'Recipe created successfully', 90)
 
-        # Step 7: Upload to target
-        emit_progress('upload', f'Uploading to {config.OUTPUT_TARGET}...', 95)
+        # Step 7: Upload to target (with optional preview confirmation)
+        if config.CONFIRM_BEFORE_UPLOAD:
+            # Show preview and wait for user confirmation
+            emit_progress('preview', 'Waiting for your confirmation...', 90)
+            
+            # Prepare image data for preview if available
+            image_data = None
+            if image_path and os.path.exists(image_path):
+                with open(image_path, 'rb') as f:
+                    image_data = base64.b64encode(f.read()).decode('utf-8')
+            
+            # Create event for waiting
+            confirm_event = eventlet.event.Event()
+            upload_id = secrets.token_hex(16)
+            
+            pending_uploads[upload_id] = {
+                'recipe': recipe_data,
+                'image_path': image_path,
+                'output_target': config.OUTPUT_TARGET,
+                'event': confirm_event,
+                'confirmed': None
+            }
+            
+            # Send preview to client
+            socketio.emit('recipe_preview', {
+                'upload_id': upload_id,
+                'recipe': recipe_data,
+                'image_data': image_data,
+                'output_target': config.OUTPUT_TARGET
+            })
+            
+            # Wait for user response (with timeout)
+            try:
+                confirmed = confirm_event.wait(timeout=300)  # 5 minute timeout
+            except eventlet.Timeout:
+                confirmed = False
+                emit_progress('error', 'Upload confirmation timed out', 100)
+                del pending_uploads[upload_id]
+                return
+            
+            # Clean up pending upload
+            pending_data = pending_uploads.pop(upload_id, None)
+            
+            if not confirmed:
+                emit_progress('cancelled', 'Upload cancelled by user', 100)
+                socketio.emit('recipe_cancelled', {'message': 'Recipe upload was cancelled'})
+                return
+            
+            emit_progress('upload', f'Uploading to {config.OUTPUT_TARGET}...', 95)
+        else:
+            emit_progress('upload', f'Uploading to {config.OUTPUT_TARGET}...', 95)
+        
+        eventlet.sleep(0)  # Yield to event loop
 
         if config.OUTPUT_TARGET == 'tandoor':
             from tandoor import Tandoor
@@ -275,7 +348,26 @@ def handle_connect():
     emit('connected', {'status': 'Connected to server'})
 
 
+@socketio.on('confirm_upload')
+def handle_confirm_upload(data):
+    """Handle user confirmation of recipe upload."""
+    upload_id = data.get('upload_id')
+    if upload_id and upload_id in pending_uploads:
+        pending_uploads[upload_id]['confirmed'] = True
+        pending_uploads[upload_id]['event'].send(True)
+
+
+@socketio.on('cancel_upload')
+def handle_cancel_upload(data):
+    """Handle user cancellation of recipe upload."""
+    upload_id = data.get('upload_id')
+    if upload_id and upload_id in pending_uploads:
+        pending_uploads[upload_id]['confirmed'] = False
+        pending_uploads[upload_id]['event'].send(False)
+
+
 if __name__ == '__main__':
+    load_dotenv()
     host = os.getenv('HOST', '0.0.0.0')
-    port = int(os.getenv('PORT', '5000'))
+    port = int(os.getenv('PORT', '5006'))
     socketio.run(app, debug=True, host=host, port=port)

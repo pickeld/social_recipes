@@ -81,6 +81,48 @@
         </button>
     </div>
 </div>
+
+<!-- Recipe Preview Modal -->
+<div class="modal-overlay" id="preview-modal" style="display: none;">
+    <div class="modal-container">
+        <div class="modal-header">
+            <h2><i class="fas fa-eye"></i> Recipe Preview</h2>
+            <p class="modal-subtitle">Review before uploading to <span id="preview-target"></span></p>
+        </div>
+        
+        <div class="modal-body">
+            <div class="preview-image-container" id="preview-image-container" style="display: none;">
+                <img id="preview-image" src="" alt="Dish preview">
+            </div>
+            
+            <div class="preview-content">
+                <h3 id="preview-title"></h3>
+                <p id="preview-description"></p>
+                
+                <div class="preview-section">
+                    <h4><i class="fas fa-list"></i> Ingredients</h4>
+                    <ul id="preview-ingredients"></ul>
+                </div>
+                
+                <div class="preview-section">
+                    <h4><i class="fas fa-tasks"></i> Instructions</h4>
+                    <ol id="preview-instructions"></ol>
+                </div>
+            </div>
+        </div>
+        
+        <div class="modal-footer">
+            <button id="cancel-upload-btn" class="btn btn-secondary">
+                <i class="fas fa-times"></i>
+                Cancel
+            </button>
+            <button id="confirm-upload-btn" class="btn btn-primary">
+                <i class="fas fa-cloud-upload-alt"></i>
+                Confirm Upload
+            </button>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_scripts %}
