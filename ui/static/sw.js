@@ -1,5 +1,5 @@
-const CACHE_NAME = 'social-recipes-v2';
-const STATIC_CACHE_NAME = 'social-recipes-static-v2';
+const CACHE_NAME = 'social-recipes-v3';
+const STATIC_CACHE_NAME = 'social-recipes-static-v3';
 
 // Static assets to cache on install
 const STATIC_ASSETS = [
@@ -8,12 +8,6 @@ const STATIC_ASSETS = [
   '/static/manifest.json',
   '/static/icons/icon-192x192.png',
   '/static/icons/icon-512x512.png'
-];
-
-// External resources (cached on first use)
-const EXTERNAL_RESOURCES = [
-  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css',
-  'https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.1/socket.io.min.js'
 ];
 
 // Install event - cache static resources
@@ -27,7 +21,6 @@ self.addEventListener('install', (event) => {
       })
       .then(() => {
         console.log('[SW] Static assets cached successfully');
-        // Skip waiting to activate immediately
         return self.skipWaiting();
       })
       .catch((error) => {
@@ -41,7 +34,6 @@ self.addEventListener('activate', (event) => {
   console.log('[SW] Activating service worker...');
   event.waitUntil(
     Promise.all([
-      // Clean up old caches
       caches.keys().then((cacheNames) => {
         return Promise.all(
           cacheNames.map((cacheName) => {
@@ -52,7 +44,6 @@ self.addEventListener('activate', (event) => {
           })
         );
       }),
-      // Take control of all clients immediately
       self.clients.claim()
     ]).then(() => {
       console.log('[SW] Service worker activated and controlling');
@@ -60,11 +51,18 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch event - network-first for HTML, cache-first for static assets
+// Fetch event handler
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   
-  // Skip non-GET requests
+  // Handle share target POST requests specially
+  if (event.request.method === 'POST' && url.pathname === '/share') {
+    console.log('[SW] Handling share target POST request');
+    event.respondWith(handleShareTarget(event.request));
+    return;
+  }
+  
+  // Skip non-GET requests (except share target handled above)
   if (event.request.method !== 'GET') {
     return;
   }
@@ -79,7 +77,6 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(event.request)
         .then((response) => {
-          // Clone and cache successful responses
           if (response.ok) {
             const responseClone = response.clone();
             caches.open(CACHE_NAME).then((cache) => {
@@ -89,12 +86,10 @@ self.addEventListener('fetch', (event) => {
           return response;
         })
         .catch(() => {
-          // Fallback to cache on network failure
           return caches.match(event.request).then((cachedResponse) => {
             if (cachedResponse) {
               return cachedResponse;
             }
-            // Return cached index page as fallback
             return caches.match('/');
           });
         })
@@ -139,7 +134,6 @@ self.addEventListener('fetch', (event) => {
           }
           return response;
         }).catch(() => {
-          // Return empty response for failed external resources
           return new Response('', { status: 503 });
         });
       })
@@ -159,18 +153,69 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
+// Handle share target POST requests
+async function handleShareTarget(request) {
+  console.log('[SW] Processing share target data');
+  
+  try {
+    // Get form data from the POST request
+    const formData = await request.formData();
+    const title = formData.get('title') || '';
+    const text = formData.get('text') || '';
+    const url = formData.get('url') || '';
+    
+    console.log('[SW] Share data received:', { title, text, url });
+    
+    // Extract URL from shared content
+    // Apps like TikTok/Instagram often share URL in the "text" field
+    let sharedUrl = url;
+    
+    if (!sharedUrl && text) {
+      // Try to extract URL from text using regex
+      const urlRegex = /(https?:\/\/[^\s]+)/gi;
+      const matches = text.match(urlRegex);
+      if (matches && matches.length > 0) {
+        sharedUrl = matches[0];
+        console.log('[SW] Extracted URL from text:', sharedUrl);
+      } else {
+        // Use entire text as potential URL
+        sharedUrl = text;
+      }
+    }
+    
+    if (!sharedUrl && title) {
+      // Last resort: check title for URL
+      const urlRegex = /(https?:\/\/[^\s]+)/gi;
+      const matches = title.match(urlRegex);
+      if (matches && matches.length > 0) {
+        sharedUrl = matches[0];
+      }
+    }
+    
+    // Redirect to the main page with the shared URL as a query parameter
+    const redirectUrl = new URL('/', self.location.origin);
+    if (sharedUrl) {
+      redirectUrl.searchParams.set('shared_url', sharedUrl);
+    }
+    if (text && text !== sharedUrl) {
+      redirectUrl.searchParams.set('shared_text', text);
+    }
+    
+    console.log('[SW] Redirecting to:', redirectUrl.toString());
+    
+    // Return a redirect response
+    return Response.redirect(redirectUrl.toString(), 303);
+    
+  } catch (error) {
+    console.error('[SW] Error handling share target:', error);
+    // On error, just redirect to home page
+    return Response.redirect('/', 303);
+  }
+}
+
 // Handle messages from clients
 self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
-  }
-});
-
-// Handle share target (POST requests for sharing)
-self.addEventListener('fetch', (event) => {
-  if (event.request.method === 'POST' && 
-      new URL(event.request.url).pathname === '/share') {
-    // Let the request through to the server
-    return;
   }
 });

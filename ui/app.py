@@ -96,8 +96,27 @@ def login_required(f):
 @login_required
 def index():
     """Main page with URL input and progress display."""
-    # Check for shared URL from session (set by /share route) or query params
-    shared_url = session.pop('shared_url', None) or request.args.get('url') or request.args.get('text') or ''
+    # Check for shared URL from multiple sources:
+    # 1. Session (set by /share route for POST requests)
+    # 2. shared_url query param (from service worker redirect)
+    # 3. shared_text query param (from service worker redirect)
+    # 4. url/text query params (legacy/direct)
+    shared_url = (
+        session.pop('shared_url', None) or
+        request.args.get('shared_url') or
+        request.args.get('shared_text') or
+        request.args.get('url') or
+        request.args.get('text') or
+        ''
+    )
+    
+    # Extract URL from shared text if needed (apps like TikTok share URLs in text)
+    if shared_url and not shared_url.startswith('http'):
+        import re
+        url_match = re.search(r'(https?://[^\s]+)', shared_url)
+        if url_match:
+            shared_url = url_match.group(1)
+    
     return render_template('index.html', shared_url=shared_url)
 
 
@@ -109,20 +128,37 @@ def share():
     share_target can POST data before authentication. The URL is saved to
     session first, then user is redirected to login if needed.
     """
+    import re
+    
     # Get shared content from POST form data (Android) or query params (fallback)
     if request.method == 'POST':
-        shared_url = request.form.get('url') or request.form.get('text') or ''
+        shared_url = request.form.get('url') or ''
+        shared_text = request.form.get('text') or ''
         shared_title = request.form.get('title', '')
     else:
-        shared_url = request.args.get('url') or request.args.get('text') or ''
+        shared_url = request.args.get('url') or ''
+        shared_text = request.args.get('text') or ''
         shared_title = request.args.get('title', '')
     
-    # Extract URL from text if it contains one
-    if not shared_url and shared_title:
-        shared_url = shared_title
+    # Try to extract URL from various sources
+    # Priority: url param > text param > title param
+    final_url = shared_url
+    
+    if not final_url and shared_text:
+        # Apps like TikTok/Instagram often share URL in text field
+        url_match = re.search(r'(https?://[^\s]+)', shared_text)
+        if url_match:
+            final_url = url_match.group(1)
+        else:
+            final_url = shared_text
+    
+    if not final_url and shared_title:
+        url_match = re.search(r'(https?://[^\s]+)', shared_title)
+        if url_match:
+            final_url = url_match.group(1)
     
     # Store in session BEFORE checking auth - this preserves the URL through login
-    session['shared_url'] = shared_url
+    session['shared_url'] = final_url
     
     # If user is not logged in, redirect to login (URL is preserved in session)
     if 'user' not in session:
