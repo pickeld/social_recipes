@@ -83,7 +83,14 @@ class Tandoor:
     def _build_ingredients(self, recipe_data: dict) -> list[dict]:
         """
         Build Tandoor ingredient list from recipe data.
-        Tandoor will auto-create units and foods when given just names (no IDs needed).
+        
+        According to Tandoor API (v2.3.6):
+        - Ingredient requires: amount (float), food (Food|null), unit (Unit|null)
+        - Food requires: name (string, minLength: 1)
+        - Unit requires: name (string, minLength: 1)
+        
+        Tandoor will auto-create units and foods when given objects with just 'name'.
+        When no food/unit is available, pass null (not an empty object).
         """
         ingredients = []
         order = 0
@@ -117,17 +124,30 @@ class Tandoor:
 
                 amount = self._coerce_num(qty_s)
                 
-                # Tandoor auto-creates units/foods when given just the name
+                # Tandoor API: food and unit must be objects with 'name' field or null
+                # Do NOT pass empty objects {} - only {"name": "value"} or null
                 unit_obj = {"name": unit_name} if unit_name else None
                 food_obj = {"name": food_name} if food_name else None
 
+                # If we have no food name but have raw text, use raw text as food name
+                # This ensures Tandoor has something to display
+                if not food_obj and raw:
+                    food_obj = {"name": raw[:128]}  # Tandoor food name max is 128 chars
+
                 ingredient = {
-                    "amount": amount,
+                    "amount": amount if amount > 0 else 0,
                     "unit": unit_obj,
                     "food": food_obj,
-                    "note": note or raw or "",
+                    "note": note or "",
                     "order": order,
+                    "is_header": False,
+                    "no_amount": amount == 0,
                 }
+                
+                # Store original text for reference
+                if raw:
+                    ingredient["original_text"] = raw[:512]  # max 512 chars per API
+                    
                 ingredients.append(ingredient)
                 order += 1
         else:
@@ -139,29 +159,60 @@ class Tandoor:
                 if not raw:
                     continue
 
-                # Simple parse: number + unit + rest
+                # Enhanced parsing: number + optional unit + rest as food
+                # Pattern: optional amount, optional unit, required food
                 m2 = re.match(
-                    r"^\s*(\d+(?:[.,]\d+)?)\s*([^\s]+)?\s+(.*)$", raw
+                    r"^\s*(\d+(?:[.,]\d+)?(?:\s*[-–]\s*\d+(?:[.,]\d+)?)?)?[\s]*"  # amount (optional, with range support)
+                    r"([a-zA-Z]+(?:\s+[a-zA-Z]+)?)?[\s]*"  # unit (optional, 1-2 words)
+                    r"(.+)?$",  # food (rest)
+                    raw
                 )
                 amount = 0
                 unit_name = ""
                 food_name = ""
 
                 if m2:
-                    amount = self._coerce_num(m2.group(1))
-                    unit_name = (m2.group(2) or "").strip()
+                    amount = self._coerce_num(m2.group(1) or "")
+                    potential_unit = (m2.group(2) or "").strip()
                     food_name = (m2.group(3) or "").strip()
+                    
+                    # Common unit abbreviations and names
+                    common_units = {
+                        'g', 'kg', 'mg', 'lb', 'lbs', 'oz', 'ml', 'l', 'dl', 'cl',
+                        'cup', 'cups', 'tbsp', 'tsp', 'tablespoon', 'tablespoons',
+                        'teaspoon', 'teaspoons', 'piece', 'pieces', 'slice', 'slices',
+                        'clove', 'cloves', 'pinch', 'bunch', 'can', 'cans',
+                        'package', 'packages', 'pkg', 'jar', 'bottle', 'head',
+                        'stalk', 'stalks', 'sprig', 'sprigs', 'handful', 'dash'
+                    }
+                    
+                    # Only treat as unit if it's a known unit
+                    if potential_unit.lower() in common_units:
+                        unit_name = potential_unit
+                    else:
+                        # Not a known unit, prepend to food name
+                        if potential_unit and food_name:
+                            food_name = f"{potential_unit} {food_name}"
+                        elif potential_unit:
+                            food_name = potential_unit
 
-                # Tandoor auto-creates units/foods when given just the name
+                # Ensure food_name exists; use raw if needed
+                if not food_name:
+                    food_name = raw
+
+                # Build objects according to Tandoor API spec
                 unit_obj = {"name": unit_name} if unit_name else None
-                food_obj = {"name": food_name} if food_name else None
+                food_obj = {"name": food_name[:128]} if food_name else None  # max 128 chars
 
                 ingredient = {
-                    "amount": amount,
+                    "amount": amount if amount > 0 else 0,
                     "unit": unit_obj,
                     "food": food_obj,
-                    "note": raw,
+                    "note": "",
                     "order": order,
+                    "is_header": False,
+                    "no_amount": amount == 0,
+                    "original_text": raw[:512],  # max 512 chars per API
                 }
                 ingredients.append(ingredient)
                 order += 1
@@ -171,7 +222,15 @@ class Tandoor:
     def _build_steps(self, recipe_data: dict) -> list[dict]:
         """
         Build Tandoor step list from recipe instructions.
-        Tandoor expects: { instruction, ingredients (list), order, time, name }
+        
+        According to Tandoor API (v2.3.6) Step schema:
+        - instruction: string (the step text)
+        - ingredients: array of Ingredient objects (required)
+        - order: integer
+        - time: integer (time in minutes for this step)
+        - name: string (optional step name/header, max 128 chars)
+        - show_as_header: boolean
+        - show_ingredients_table: boolean
         """
         steps = []
         instructions_src = recipe_data.get("recipeInstructions", [])
@@ -179,8 +238,62 @@ class Tandoor:
 
         for step in instructions_src:
             text = ""
+            step_name = ""
+            
             if isinstance(step, dict):
-                text = (step.get("text") or "").strip()
+                # Handle HowToStep schema.org format
+                text = (step.get("text") or step.get("description") or "").strip()
+                step_name = (step.get("name") or "").strip()
+                
+                # Handle HowToSection which groups steps
+                if step.get("@type") == "HowToSection":
+                    section_name = step.get("name", "")
+                    item_list = step.get("itemListElement", [])
+                    
+                    # Add section header as a step
+                    if section_name:
+                        section_step = {
+                            "instruction": "",
+                            "ingredients": [],
+                            "order": order,
+                            "time": 0,
+                            "name": section_name[:128],
+                            "show_as_header": True,
+                            "show_ingredients_table": False,
+                        }
+                        steps.append(section_step)
+                        order += 1
+                    
+                    # Process nested steps
+                    for nested_step in item_list:
+                        if isinstance(nested_step, dict):
+                            nested_text = (nested_step.get("text") or "").strip()
+                            if nested_text:
+                                step_obj = {
+                                    "instruction": nested_text,
+                                    "ingredients": [],
+                                    "order": order,
+                                    "time": 0,
+                                    "name": "",
+                                    "show_as_header": False,
+                                    "show_ingredients_table": True,
+                                }
+                                steps.append(step_obj)
+                                order += 1
+                        elif isinstance(nested_step, str) and nested_step.strip():
+                            step_obj = {
+                                "instruction": nested_step.strip(),
+                                "ingredients": [],
+                                "order": order,
+                                "time": 0,
+                                "name": "",
+                                "show_as_header": False,
+                                "show_ingredients_table": True,
+                            }
+                            steps.append(step_obj)
+                            order += 1
+                    continue  # Already processed section items
+                    
             elif isinstance(step, str):
                 text = step.strip()
 
@@ -190,35 +303,119 @@ class Tandoor:
                     "ingredients": [],
                     "order": order,
                     "time": 0,
-                    "name": "",
+                    "name": step_name[:128] if step_name else "",
+                    "show_as_header": False,
+                    "show_ingredients_table": True,
                 }
                 steps.append(step_obj)
                 order += 1
 
         return steps
 
+    def _build_keywords(self, recipe_data: dict) -> list[dict]:
+        """
+        Build Tandoor keyword list from recipe data.
+        
+        According to Tandoor API (v2.3.6) Keyword schema:
+        - name: string (max 64 chars, required)
+        - description: string (optional)
+        
+        Tandoor auto-creates keywords when given objects with just 'name'.
+        """
+        keywords = []
+        seen_names = set()
+        
+        # Extract from recipeCategory
+        categories = recipe_data.get("recipeCategory", [])
+        if isinstance(categories, str):
+            categories = [c.strip() for c in categories.split(",") if c.strip()]
+        elif not isinstance(categories, list):
+            categories = []
+            
+        for cat in categories:
+            if isinstance(cat, str) and cat.strip():
+                name = cat.strip()[:64]  # max 64 chars
+                if name.lower() not in seen_names:
+                    keywords.append({"name": name})
+                    seen_names.add(name.lower())
+        
+        # Extract from recipeCuisine
+        cuisines = recipe_data.get("recipeCuisine", [])
+        if isinstance(cuisines, str):
+            cuisines = [c.strip() for c in cuisines.split(",") if c.strip()]
+        elif not isinstance(cuisines, list):
+            cuisines = []
+            
+        for cuisine in cuisines:
+            if isinstance(cuisine, str) and cuisine.strip():
+                name = cuisine.strip()[:64]
+                if name.lower() not in seen_names:
+                    keywords.append({"name": name})
+                    seen_names.add(name.lower())
+        
+        # Extract from keywords field (common in recipe data)
+        kw_list = recipe_data.get("keywords", [])
+        if isinstance(kw_list, str):
+            kw_list = [k.strip() for k in kw_list.split(",") if k.strip()]
+        elif not isinstance(kw_list, list):
+            kw_list = []
+            
+        for kw in kw_list:
+            if isinstance(kw, str) and kw.strip():
+                name = kw.strip()[:64]
+                if name.lower() not in seen_names:
+                    keywords.append({"name": name})
+                    seen_names.add(name.lower())
+        
+        # Extract from tags if present
+        tags = recipe_data.get("tags", [])
+        if isinstance(tags, str):
+            tags = [t.strip() for t in tags.split(",") if t.strip()]
+        elif not isinstance(tags, list):
+            tags = []
+            
+        for tag in tags:
+            if isinstance(tag, str) and tag.strip():
+                name = tag.strip()[:64]
+                if name.lower() not in seen_names:
+                    keywords.append({"name": name})
+                    seen_names.add(name.lower())
+        
+        return keywords
+
     def _to_tandoor_payload(self, recipe_data: dict) -> dict:
         """
         Map Schema.org style recipe into Tandoor API expected fields.
-        Tandoor recipe structure:
-          - name
-          - description
-          - servings
-          - servings_text
-          - working_time (minutes)
-          - waiting_time (minutes)
-          - source_url
-          - steps: list of step objects with ingredients
+        
+        According to Tandoor API (v2.3.6) Recipe schema, required fields are:
+          - name: string (max 128 chars)
+          - steps: array of Step objects
+          
+        Optional fields we use:
+          - description: string (max 512 chars)
+          - keywords: array of Keyword objects
+          - servings: integer
+          - servings_text: string (max 32 chars)
+          - working_time: integer (minutes)
+          - waiting_time: integer (minutes)
+          - source_url: string (max 1024 chars)
+          - internal: boolean
+          - show_ingredient_overview: boolean
         """
+        # Name is required, max 128 chars
         name = (
             recipe_data.get("name")
             or recipe_data.get("headline")
             or recipe_data.get("title")
             or "Untitled"
-        )
-        description = recipe_data.get("description", "") or ""
+        )[:128]
+        
+        # Description is optional, max 512 chars
+        description = (recipe_data.get("description", "") or "")[:512]
+        
+        # Servings
         servings = self._extract_servings(recipe_data)
-        servings_text = str(recipe_data.get("recipeYield") or servings)
+        servings_text = str(recipe_data.get("recipeYield") or servings)[:32]  # max 32 chars
 
         # Parse times
         prep_time = self._parse_iso_duration(recipe_data.get("prepTime", ""))
@@ -231,12 +428,13 @@ class Tandoor:
         if total_time and not (working_time or waiting_time):
             working_time = total_time
 
-        source_url = recipe_data.get(
-            "url") or recipe_data.get("source_url") or ""
+        # Source URL, max 1024 chars
+        source_url = (recipe_data.get("url") or recipe_data.get("source_url") or "")[:1024]
 
-        # Build ingredients and steps (no API calls needed - Tandoor auto-creates units/foods)
+        # Build ingredients, steps, and keywords
         ingredients = self._build_ingredients(recipe_data)
         steps = self._build_steps(recipe_data)
+        keywords = self._build_keywords(recipe_data)
 
         # Tandoor requires ingredients to be attached to steps.
         # If there are no steps, create a default one.
@@ -248,6 +446,8 @@ class Tandoor:
                 "order": 0,
                 "time": working_time + waiting_time,
                 "name": "",
+                "show_as_header": False,
+                "show_ingredients_table": True,
             }]
 
         # Attach all ingredients to the first step (Tandoor's model)
@@ -263,8 +463,14 @@ class Tandoor:
             "waiting_time": waiting_time,
             "source_url": source_url,
             "internal": True,
+            "show_ingredient_overview": True,
             "steps": steps,
         }
+        
+        # Add keywords if any were extracted
+        if keywords:
+            payload["keywords"] = keywords
+        
         return payload
 
     def create_recipe(self, recipe_data: dict) -> dict:
