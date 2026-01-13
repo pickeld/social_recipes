@@ -1,5 +1,6 @@
-const CACHE_NAME = 'social-recipes-v3';
-const STATIC_CACHE_NAME = 'social-recipes-static-v3';
+const CACHE_NAME = 'social-recipes-v5';
+const STATIC_CACHE_NAME = 'social-recipes-static-v5';
+const CDN_CACHE_NAME = 'social-recipes-cdn-v5';
 
 // Static assets to cache on install
 const STATIC_ASSETS = [
@@ -10,34 +11,60 @@ const STATIC_ASSETS = [
   '/static/icons/icon-512x512.png'
 ];
 
+// CDN assets to pre-cache (these need special CORS handling)
+const CDN_ASSETS = [
+  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css',
+  'https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.1/socket.io.min.js'
+];
+
 // Install event - cache static resources
 self.addEventListener('install', (event) => {
   console.log('[SW] Installing service worker...');
   event.waitUntil(
-    caches.open(STATIC_CACHE_NAME)
-      .then((cache) => {
-        console.log('[SW] Caching static assets');
-        return cache.addAll(STATIC_ASSETS);
-      })
-      .then(() => {
-        console.log('[SW] Static assets cached successfully');
-        return self.skipWaiting();
-      })
-      .catch((error) => {
-        console.error('[SW] Cache install failed:', error);
-      })
+    Promise.all([
+      // Cache local static assets
+      caches.open(STATIC_CACHE_NAME)
+        .then((cache) => {
+          console.log('[SW] Caching static assets');
+          return cache.addAll(STATIC_ASSETS);
+        }),
+      // Pre-cache CDN assets with no-cors mode
+      caches.open(CDN_CACHE_NAME)
+        .then((cache) => {
+          console.log('[SW] Pre-caching CDN assets');
+          return Promise.all(
+            CDN_ASSETS.map(url =>
+              fetch(url, { mode: 'cors', credentials: 'omit' })
+                .then(response => {
+                  if (response.ok) {
+                    return cache.put(url, response);
+                  }
+                })
+                .catch(err => console.warn('[SW] Failed to cache CDN asset:', url, err))
+            )
+          );
+        })
+    ])
+    .then(() => {
+      console.log('[SW] All assets cached successfully');
+      return self.skipWaiting();
+    })
+    .catch((error) => {
+      console.error('[SW] Cache install failed:', error);
+    })
   );
 });
 
 // Activate event - clean up old caches and take control
 self.addEventListener('activate', (event) => {
   console.log('[SW] Activating service worker...');
+  const currentCaches = [CACHE_NAME, STATIC_CACHE_NAME, CDN_CACHE_NAME];
   event.waitUntil(
     Promise.all([
       caches.keys().then((cacheNames) => {
         return Promise.all(
           cacheNames.map((cacheName) => {
-            if (cacheName !== CACHE_NAME && cacheName !== STATIC_CACHE_NAME) {
+            if (!currentCaches.includes(cacheName)) {
               console.log('[SW] Deleting old cache:', cacheName);
               return caches.delete(cacheName);
             }
@@ -55,6 +82,11 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   
+  // Skip chrome-extension, moz-extension, and other non-http(s) requests
+  if (!url.protocol.startsWith('http')) {
+    return;
+  }
+  
   // Handle share target POST requests specially
   if (event.request.method === 'POST' && url.pathname === '/share') {
     console.log('[SW] Handling share target POST request');
@@ -64,11 +96,6 @@ self.addEventListener('fetch', (event) => {
   
   // Skip non-GET requests (except share target handled above)
   if (event.request.method !== 'GET') {
-    return;
-  }
-  
-  // Skip WebSocket requests
-  if (url.protocol === 'ws:' || url.protocol === 'wss:') {
     return;
   }
   
@@ -118,26 +145,43 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   
-  // Handle external resources (CDN) - cache-first with network fallback
-  if (!url.origin.includes(self.location.origin)) {
-    event.respondWith(
-      caches.match(event.request).then((cachedResponse) => {
-        if (cachedResponse) {
-          return cachedResponse;
-        }
-        return fetch(event.request, { mode: 'cors' }).then((response) => {
-          if (response.ok) {
-            const responseClone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, responseClone);
-            });
+  // Handle CDN resources (external origins) - cache-first with proper CORS handling
+  if (url.origin !== self.location.origin) {
+    // Check if this is a known CDN resource
+    const isCDN = url.hostname.includes('cdnjs.cloudflare.com') ||
+                  url.hostname.includes('cdn.') ||
+                  url.hostname.includes('fonts.googleapis.com') ||
+                  url.hostname.includes('fonts.gstatic.com');
+    
+    if (isCDN) {
+      event.respondWith(
+        caches.match(event.request).then((cachedResponse) => {
+          if (cachedResponse) {
+            return cachedResponse;
           }
-          return response;
-        }).catch(() => {
-          return new Response('', { status: 503 });
-        });
-      })
-    );
+          // Use credentials: 'omit' to avoid CORS issues with CDNs
+          return fetch(event.request.url, {
+            mode: 'cors',
+            credentials: 'omit'
+          }).then((response) => {
+            if (response.ok) {
+              const responseClone = response.clone();
+              caches.open(CDN_CACHE_NAME).then((cache) => {
+                cache.put(event.request.url, responseClone);
+              });
+            }
+            return response;
+          }).catch((error) => {
+            console.warn('[SW] CDN fetch failed:', url.href, error);
+            // Return empty response for non-critical CDN resources
+            return new Response('', { status: 503 });
+          });
+        })
+      );
+      return;
+    }
+    
+    // Skip other external requests (analytics, etc.) - don't intercept
     return;
   }
   
