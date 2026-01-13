@@ -5,7 +5,6 @@ This module provides functionality to export recipes to Mealie.
 """
 
 from config import config
-import re
 
 from recipe_exporter import RecipeExporter
 from helpers import coerce_num, extract_servings, parse_nutrition_value

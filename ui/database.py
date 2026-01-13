@@ -127,29 +127,7 @@ def update_password(username: str, new_password: str) -> bool:
         return cursor.rowcount > 0
 
 
-def get_user(username: str) -> dict | None:
-    """Get user by username."""
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute('SELECT * FROM users WHERE username = ?', (username,))
-        row = cursor.fetchone()
-        if row:
-            return dict(row)
-        return None
-
-
 # ===== Config Functions =====
-
-def get_config_value(key: str) -> str | None:
-    """Get a single config value."""
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute('SELECT value FROM config WHERE key = ?', (key,))
-        row = cursor.fetchone()
-        if row:
-            return row['value']
-        return DEFAULT_CONFIG.get(key)
-
 
 def set_config_value(key: str, value: str) -> bool:
     """Set a single config value."""
