@@ -1,0 +1,24 @@
+version: "3.8"
+
+services:
+  social-recipes:
+    build: .
+    container_name: social-recipes
+    restart: unless-stopped
+    ports:
+      - "5006:5006"
+    volumes:
+      # Persist the SQLite database
+      - ./social_recipes.db:/app/social_recipes.db
+      # Persist the Flask secret key
+      - ./ui/.flask_secret_key:/app/ui/.flask_secret_key
+      # Temporary storage for video processing
+      - social_recipes_tmp:/tmp
+    environment:
+      - HOST=0.0.0.0
+      - PORT=5006
+      # Optional: Set a fixed secret key for sessions
+      # - FLASK_SECRET_KEY=your-secret-key-here
+
+volumes:
+  social_recipes_tmp:

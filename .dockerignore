@@ -1,0 +1,34 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv
+venv
+ENV
+env
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Project specific
+tmp/
+*.db
+.flask_secret_key
+.env
+*.log
+
+# Documentation
+*.md
+!README.md
+
+# Plans
+plans/
