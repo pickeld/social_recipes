@@ -18,11 +18,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Create tmp directory for video processing
-RUN mkdir -p /tmp
-
 # Expose the web UI port
 EXPOSE 5006
+
+# Default environment variables
+ENV FLASK_DEBUG=false
 
 # Run the Flask application
 CMD ["python", "ui/app.py"]

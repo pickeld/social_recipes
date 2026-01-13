@@ -435,4 +435,5 @@ if __name__ == '__main__':
     load_dotenv()
     host = os.getenv('HOST', '0.0.0.0')
     port = int(os.getenv('PORT', '5006'))
-    socketio.run(app, debug=True, host=host, port=port)
+    debug = os.getenv('FLASK_DEBUG', 'false').lower() in ('true', '1', 'yes')
+    socketio.run(app, debug=debug, host=host, port=port, allow_unsafe_werkzeug=True)
