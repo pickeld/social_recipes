@@ -62,7 +62,10 @@ def get_yield_nutrition_prompt() -> str:
     target_lang = _get_target_lang()
     return f"""You are a registered-dietitian-style assistant.
 Given a recipe's ingredients and instructions, estimate:
-- servings (number of portions; if unclear, infer a reasonable integer)
+- servings (number of portions; if unclear, infer a reasonable integer based on ingredient amounts)
+- prepTime (time to prepare ingredients, in minutes)
+- cookTime (time to cook/bake, in minutes)
+- totalTime (total time from start to finish, in minutes)
 - per-serving nutrition (Schema.org NutritionInformation fields):
   calories (kcal), proteinContent (g), fatContent (g), carbohydrateContent (g),
   fiberContent (g), sugarContent (g), sodiumContent (mg), cholesterolContent (mg).
@@ -71,6 +74,9 @@ Return a single valid JSON object with:
 {{
   "servings": <int>,
   "recipeYield": "<string in {target_lang}, e.g., '4 מנות' for Hebrew or '4 servings' for English>",
+  "prepTime": "PT15M",
+  "cookTime": "PT30M",
+  "totalTime": "PT45M",
   "nutrition": {{
     "@type": "NutritionInformation",
     "calories": "450 kcal",
@@ -83,7 +89,9 @@ Return a single valid JSON object with:
     "cholesterolContent": "70 mg"
   }}
 }}
+Time values must be in ISO 8601 duration format (e.g., "PT30M" for 30 minutes, "PT1H" for 1 hour, "PT1H30M" for 1 hour 30 minutes).
 All nutrition values are per serving.
 Do not invent impossible numbers; keep them plausible.
+Estimate times based on the complexity of the recipe and cooking methods described.
 Output recipeYield in {target_lang}.
 """

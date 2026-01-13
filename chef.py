@@ -184,11 +184,14 @@ class Chef:
     def _enrich_yield_and_nutrition(self, recipe: dict) -> dict:
         need_yield = "recipeYield" not in recipe
         need_nutrition = "nutrition" not in recipe
+        need_prep_time = "prepTime" not in recipe
+        need_cook_time = "cookTime" not in recipe
+        need_total_time = "totalTime" not in recipe
 
-        if not (need_yield or need_nutrition):
-            return recipe  # אין מה להשלים
+        if not (need_yield or need_nutrition or need_prep_time or need_cook_time or need_total_time):
+            return recipe  # Nothing to enrich
 
-        # נכין קלט למודל: רשימת מצרכים + הוראות
+        # Prepare input for the LLM: ingredients list + instructions
         payload = {
             "language_hint": config.RECIPE_LANG,
             "ingredients": recipe.get("recipeIngredient", []),
@@ -206,11 +209,10 @@ class Chef:
             est = json.loads(response_text)
         except json.JSONDecodeError as e:
             raise RuntimeError(
-                f"Nutrition/servings estimation failed: {e}\nRaw:\n{response_text}")
+                f"Nutrition/servings/time estimation failed: {e}\nRaw:\n{response_text}")
 
-        # החלה מבוקרת:
+        # Apply yield if needed
         if need_yield:
-            # נעדיף מחרוזת בשפת המתכון (אם Hebrew – "X מנות")
             ry = est.get("recipeYield")
             servings = est.get("servings")
             if not ry and isinstance(servings, int) and servings > 0:
@@ -218,8 +220,21 @@ class Chef:
             if ry:
                 recipe["recipeYield"] = str(ry)
 
+        # Apply time estimates if needed
+        if need_prep_time and est.get("prepTime"):
+            recipe["prepTime"] = str(est["prepTime"])
+            logger.info(f"Estimated prepTime: {est['prepTime']}")
+            
+        if need_cook_time and est.get("cookTime"):
+            recipe["cookTime"] = str(est["cookTime"])
+            logger.info(f"Estimated cookTime: {est['cookTime']}")
+            
+        if need_total_time and est.get("totalTime"):
+            recipe["totalTime"] = str(est["totalTime"])
+            logger.info(f"Estimated totalTime: {est['totalTime']}")
+
+        # Apply nutrition if needed
         if need_nutrition and isinstance(est.get("nutrition"), dict):
-            # להשלים רק שדות חוקיים של Schema.org
             allowed = {
                 "@type", "calories", "proteinContent", "fatContent", "carbohydrateContent",
                 "fiberContent", "sugarContent", "sodiumContent", "cholesterolContent"
@@ -228,7 +243,7 @@ class Chef:
             for k, v in est["nutrition"].items():
                 if k in allowed and v:
                     nutrition[k] = str(v)
-            # אם יש לפחות calories או אחד נוסף – נוסיף לשדה
+            # Add nutrition if we have at least one valid field
             if any(k in nutrition for k in ("calories", "proteinContent", "fatContent",
                                             "carbohydrateContent", "fiberContent",
                                             "sugarContent", "sodiumContent", "cholesterolContent")):
