@@ -1,5 +1,10 @@
 # Social Recipes
 
+[![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
+[![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://www.docker.com/)
+[![Flask](https://img.shields.io/badge/Flask-Web_UI-green.svg)](https://flask.palletsprojects.com/)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Extract recipes from social media videos (TikTok, YouTube, Instagram, etc.) and automatically import them into your self-hosted recipe manager.
 
 ## Overview
@@ -90,7 +95,7 @@ Social Recipes is a Python application that:
 All configuration is managed through the web UI settings page (`/settings`). On first run, use the default credentials:
 
 - **Username:** `admin`
-- **Password:** `admin`
+- **Password:** `admin123`
 
 > ⚠️ **Important:** Change the default password immediately after first login!
 
@@ -222,3 +227,19 @@ MIT License - see LICENSE file for details.
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+---
+
+## GitHub Repository
+
+### Description
+
+AI-powered recipe extraction from TikTok, YouTube & Instagram videos with automatic import to Tandoor/Mealie recipe managers.
+
+### Topics
+
+```
+recipe-extraction tiktok youtube instagram whisper openai gemini tandoor mealie self-hosted docker flask python ai llm video-processing transcription cooking food automation
+```
+
+**To configure:** Go to your repository on GitHub → Click the ⚙️ gear icon next to "About" → Add the description and topics above.
