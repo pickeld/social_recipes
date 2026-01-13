@@ -3,6 +3,9 @@
  */
 
 document.addEventListener('DOMContentLoaded', function() {
+    // Check for shared URL from Web Share Target API
+    checkForSharedContent();
+    
     // Initialize Socket.IO connection
     const socket = io();
     
@@ -505,6 +508,26 @@ document.addEventListener('DOMContentLoaded', function() {
             document.body.style.overflow = '';
         }
         currentUploadId = null;
+    }
+    
+    /**
+     * Check for shared content from Web Share Target API
+     */
+    function checkForSharedContent() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const sharedUrl = urlParams.get('url') || urlParams.get('text');
+        
+        if (sharedUrl && videoUrlInput) {
+            // Clean the URL from query parameters
+            window.history.replaceState({}, document.title, window.location.pathname);
+            
+            // Set the shared URL in the input
+            videoUrlInput.value = sharedUrl;
+            videoUrlInput.focus();
+            
+            // Show notification
+            showNotification('URL received! Click "Extract Recipe" to continue.', 'success');
+        }
     }
     
     /**

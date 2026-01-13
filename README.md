@@ -29,6 +29,7 @@ Social Recipes is a Python application that:
 - 🌐 Web UI with real-time progress updates
 - 🔐 User authentication and settings management
 - 🐳 Docker support for easy deployment
+- 📱 **PWA Support** - Install as app on mobile, share URLs directly from Android/iOS
 
 ## Requirements
 
@@ -155,6 +156,23 @@ All configuration is managed through the web UI settings page (`/settings`). On 
 5. Watch the real-time progress as the video is processed
 6. If "Confirm Before Upload" is enabled, review and optionally edit the recipe
 7. The recipe is automatically uploaded to your configured recipe manager
+
+### PWA / Mobile App (Share Links Directly)
+
+Social Recipes supports PWA (Progressive Web App) installation, allowing you to share video links directly from your phone:
+
+#### Android
+1. Open `https://your-server:5006` in Chrome
+2. Tap the menu (⋮) → "Add to Home screen"
+3. Now when sharing any video link, choose "Social Recipes" from the share sheet
+
+#### iPhone / iPad
+1. Open `https://your-server:5006` in Safari
+2. Tap the Share button → "Add to Home Screen"
+3. Open the app from your home screen
+4. Share video links from TikTok/Instagram/YouTube using the Share button → "Social Recipes"
+
+> **Note:** PWA features require HTTPS in production. For local testing, `localhost` works without HTTPS.
 
 ### Command Line
 
@@ -283,7 +301,7 @@ AI-powered recipe extraction from TikTok, YouTube & Instagram videos with automa
 ### Topics
 
 ```
-recipe-extraction tiktok youtube instagram whisper openai gemini tandoor mealie self-hosted docker flask python ai llm video-processing transcription cooking food automation
+recipe-extraction tiktok youtube instagram whisper openai gemini tandoor mealie self-hosted docker flask python ai llm video-processing transcription cooking food automation pwa mobile-app share-target
 ```
 
 **To configure:** Go to your repository on GitHub → Click the ⚙️ gear icon next to "About" → Add the description and topics above.

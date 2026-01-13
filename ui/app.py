@@ -22,6 +22,16 @@ from database import (
 
 app = Flask(__name__)
 
+# Serve manifest.json with correct MIME type
+@app.route('/manifest.json')
+def serve_manifest():
+    return app.send_static_file('manifest.json')
+
+# Serve service worker with correct MIME type
+@app.route('/sw.js')
+def serve_sw():
+    return app.send_static_file('sw.js')
+
 # Secret key for session cookies - MUST be persistent across restarts
 # Generate a stable key based on a file if FLASK_SECRET_KEY is not set
 def _get_or_create_secret_key():
