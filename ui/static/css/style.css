@@ -879,23 +879,32 @@ main.with-sidebar {
 /* ===== Responsive ===== */
 @media (max-width: 768px) {
     .sidebar {
+        position: fixed;
         width: 100%;
-        height: auto;
+        height: 60px;
         flex-direction: row;
         bottom: 0;
+        left: 0;
+        right: 0;
         top: auto;
         padding: 0.5rem 1rem;
+        padding-bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
         justify-content: center;
+        gap: 1rem;
+        border-right: none;
+        border-top: 1px solid var(--border-color);
     }
     
     .sidebar-top, .sidebar-bottom {
         flex-direction: row;
+        gap: 0.5rem;
     }
     
     main.with-sidebar {
         margin-left: 0;
-        margin-bottom: 70px;
+        margin-bottom: calc(70px + env(safe-area-inset-bottom, 0px));
         padding: 1.5rem;
+        padding-bottom: calc(1.5rem + 70px + env(safe-area-inset-bottom, 0px));
     }
     
     .input-group {

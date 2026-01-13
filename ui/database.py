@@ -11,8 +11,10 @@ from contextlib import contextmanager
 # Import defaults from config module to avoid duplication
 from config import DEFAULT_CONFIG
 
-# Database file path
-DB_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'social_recipes.db')
+# Database file path - use /app/data for Docker persistence, fallback to local
+DATA_DIR = os.environ.get('DATA_DIR', os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data'))
+os.makedirs(DATA_DIR, exist_ok=True)
+DB_FILE = os.path.join(DATA_DIR, 'social_recipes.db')
 
 
 @contextmanager
