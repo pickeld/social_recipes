@@ -46,7 +46,39 @@
         
         <div class="login-footer">
             <p class="hint">Default credentials: admin / admin123</p>
+            <button id="install-btn" class="btn btn-secondary btn-block" style="display: none; margin-top: 1rem;">
+                <i class="fas fa-download"></i>
+                Install App
+            </button>
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    // Show install button when PWA can be installed
+    window.addEventListener('beforeinstallprompt', (e) => {
+        const installBtn = document.getElementById('install-btn');
+        if (installBtn) {
+            installBtn.style.display = 'block';
+            installBtn.addEventListener('click', async () => {
+                if (window.installPWA) {
+                    const installed = await window.installPWA();
+                    if (installed) {
+                        installBtn.style.display = 'none';
+                    }
+                }
+            });
+        }
+    });
+    
+    // Hide button if already installed
+    window.addEventListener('appinstalled', () => {
+        const installBtn = document.getElementById('install-btn');
+        if (installBtn) {
+            installBtn.style.display = 'none';
+        }
+    });
+</script>
 {% endblock %}
