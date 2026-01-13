@@ -1,35 +1,29 @@
+"""
+Mealie recipe exporter.
+
+This module provides functionality to export recipes to Mealie.
+"""
+
 from config import config
-import requests
 import re
-import os
+
+from recipe_exporter import RecipeExporter
+from helpers import coerce_num, extract_servings, parse_nutrition_value
 
 
-class Mealie:
+class Mealie(RecipeExporter):
+    """Export recipes to Mealie."""
+
     def __init__(self):
-        self.api_key = config.MEALIE_API_KEY
-        self.base_url = config.MEALIE_HOST.rstrip("/")
+        super().__init__(
+            api_key=config.MEALIE_API_KEY,
+            base_url=config.MEALIE_HOST,
+            name="Mealie"
+        )
 
-    def _normalize_qty_num(self, qty_str: str) -> float:
-        if not qty_str:
-            return 0
-        v = qty_str.strip()
-        if "-" in v:
-            v = v.split("-")[0].strip()
-        v = v.replace(",", ".")
-        try:
-            return float(v)
-        except ValueError:
-            return 0
-
-    def _parse_nutrition_value(self, value: str | None) -> float:
-        """Extract numeric value from nutrition string like '450 kcal' or '20 g'."""
-        if not value:
-            return 0
-        # Extract the first number from the string
-        match = re.search(r"(\d+(?:[.,]\d+)?)", str(value))
-        if match:
-            return float(match.group(1).replace(",", "."))
-        return 0
+    def _get_image_upload_url(self, recipe_id: str | int) -> str:
+        """Get the URL for image upload endpoint."""
+        return f"{self.base_url}/api/recipes/{recipe_id}/image"
 
     def _build_nutrition(self, recipe_data: dict) -> dict | None:
         """
@@ -76,13 +70,7 @@ class Mealie:
         Build payload for PATCH/PUT to /api/recipes/{id|slug} using Mealie internal field names.
         """
         ry = original_recipe_schema.get("recipeYield") or ""
-        ry_qty = 0
-        m = re.search(r"(\d+(?:[.,]\d+)?)", str(ry))
-        if m:
-            try:
-                ry_qty = int(float(m.group(1).replace(",", ".")))
-            except ValueError:
-                ry_qty = 0
+        ry_qty = extract_servings(original_recipe_schema)
 
         # Ingredients
         ing_struct = original_recipe_schema.get(
@@ -93,7 +81,7 @@ class Mealie:
                 continue
             raw = (item.get("raw") or item.get("normalized") or "").strip()
             qty_s = (item.get("quantity") or "").strip()
-            qty_num = self._normalize_qty_num(qty_s)
+            qty_num = coerce_num(qty_s)
             unit = (item.get("unit") or "").strip() or None
             food = (item.get("food") or "").strip() or None
             modifiers = item.get("modifiers") or []
@@ -148,7 +136,7 @@ class Mealie:
         nutrition = self._build_nutrition(original_recipe_schema)
         if nutrition:
             update_payload["nutrition"] = nutrition
-            print(f"[Mealie] Including nutrition: {nutrition}")
+            self._log(f"Including nutrition: {nutrition}")
         
         return update_payload
 
@@ -158,22 +146,21 @@ class Mealie:
         1. Create base recipe via POST /api/recipes (minimal payload).
         2. If server returns primitive (slug/id) or placeholder ingredient list, PATCH with full structured data.
         """
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        }
+        headers = self._build_headers()
+        
         base_payload = {
             "name": recipe_data.get("name") or recipe_data.get("title") or "Untitled",
             "description": recipe_data.get("description") or "",
         }
         create_url = f"{self.base_url}/api/recipes"
-        print(f"[Mealie] Base create POST {create_url} payload={base_payload}")
-        resp = requests.post(create_url, json=base_payload, headers=headers)
+        self._log(f"Base create POST {create_url} payload={base_payload}")
+        
+        resp = self._session.post(create_url, json=base_payload, headers=headers)
         raw_text = resp.text
-        print(f"[Mealie] Base create status {resp.status_code}")
+        self._log(f"Base create status {resp.status_code}")
+        
         if resp.status_code >= 400:
-            print(f"[Mealie] Create error body: {raw_text[:1000]}")
+            self._log(f"Create error body: {raw_text[:1000]}")
             resp.raise_for_status()
 
         # Parse primitive or object
@@ -181,8 +168,7 @@ class Mealie:
         try:
             created = resp.json()
         except Exception as e:
-            print(
-                f"[Mealie] Create JSON parse failed: {e}; raw={raw_text[:300]}")
+            self._log(f"Create JSON parse failed: {e}; raw={raw_text[:300]}")
             created = raw_text
 
         ident = None
@@ -191,8 +177,7 @@ class Mealie:
         elif isinstance(created, (str, int)):
             ident = str(created).strip().strip('"')
         if not ident:
-            print(
-                "[Mealie] Could not determine created recipe identifier; returning raw.")
+            self._log("Could not determine created recipe identifier; returning raw.")
             return {"raw": created}
 
         # Fetch current state
@@ -203,8 +188,8 @@ class Mealie:
         current = None
         for du in detail_url_candidates:
             try:
-                d_resp = requests.get(du, headers=headers)
-                print(f"[Mealie] GET {du} -> {d_resp.status_code}")
+                d_resp = self._session.get(du, headers=headers)
+                self._log(f"GET {du} -> {d_resp.status_code}")
                 if d_resp.status_code == 200:
                     try:
                         current = d_resp.json()
@@ -212,13 +197,12 @@ class Mealie:
                         ident = current.get("id") or ident
                         break
                     except Exception as e2:
-                        print(f"[Mealie] Detail parse failed: {e2}")
+                        self._log(f"Detail parse failed: {e2}")
             except Exception as e3:
-                print(f"[Mealie] Detail fetch exception: {e3}")
+                self._log(f"Detail fetch exception: {e3}")
 
         if not isinstance(current, dict):
-            print(
-                "[Mealie] Unable to fetch current dict; returning primitive response.")
+            self._log("Unable to fetch current dict; returning primitive response.")
             return {"id_or_slug": ident, "raw": created}
 
         ingr_list = current.get("recipeIngredient") or []
@@ -229,82 +213,33 @@ class Mealie:
             and (ingr_list[0].get("note") == "1 Cup Flour" or ingr_list[0].get("display") == "1 Cup Flour")
         )
         if not placeholder and ingr_list:
-            print(
-                f"[Mealie] Server already populated ingredients ({len(ingr_list)}). Skipping update.")
+            self._log(f"Server already populated ingredients ({len(ingr_list)}). Skipping update.")
             return current
 
         # Build update payload
         update_payload = self._build_update_payload(recipe_data)
-        print(
-            f"[Mealie] PATCH update ingredients={len(update_payload['recipeIngredient'])} instructions={len(update_payload['recipeInstructions'])}")
+        self._log(f"PATCH update ingredients={len(update_payload['recipeIngredient'])} instructions={len(update_payload['recipeInstructions'])}")
 
         # Try PATCH first
         patch_url = f"{self.base_url}/api/recipes/{ident}"
-        patch_resp = requests.patch(
-            patch_url, json=update_payload, headers=headers)
-        print(f"[Mealie] PATCH {patch_url} -> {patch_resp.status_code}")
+        patch_resp = self._session.patch(patch_url, json=update_payload, headers=headers)
+        self._log(f"PATCH {patch_url} -> {patch_resp.status_code}")
+        
         if patch_resp.status_code == 405:  # Method not allowed; try PUT
-            put_resp = requests.put(
-                patch_url, json=update_payload, headers=headers)
-            print(f"[Mealie] PUT {patch_url} -> {put_resp.status_code}")
+            put_resp = self._session.put(patch_url, json=update_payload, headers=headers)
+            self._log(f"PUT {patch_url} -> {put_resp.status_code}")
             if put_resp.status_code >= 400:
-                print(f"[Mealie] Update error body: {put_resp.text[:1000]}")
+                self._log(f"Update error body: {put_resp.text[:1000]}")
                 put_resp.raise_for_status()
             try:
                 return put_resp.json()
             except Exception:
                 return {"id": ident, "update_raw": put_resp.text}
         elif patch_resp.status_code >= 400:
-            print(f"[Mealie] Update error body: {patch_resp.text[:1000]}")
+            self._log(f"Update error body: {patch_resp.text[:1000]}")
             patch_resp.raise_for_status()
 
         try:
             return patch_resp.json()
         except Exception:
             return {"id": ident, "update_raw": patch_resp.text}
-
-    def upload_image(self, recipe_slug: str, image_path: str) -> bool:
-        """
-        Upload an image for a recipe.
-        PUT /api/recipes/{slug}/image
-        
-        Args:
-            recipe_slug: The slug or ID of the recipe.
-            image_path: Path to the image file (JPEG/PNG).
-        
-        Returns:
-            True if upload succeeded, False otherwise.
-        """
-        if not os.path.exists(image_path):
-            print(f"[Mealie] Image file not found: {image_path}")
-            return False
-
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Accept": "application/json",
-        }
-
-        url = f"{self.base_url}/api/recipes/{recipe_slug}/image"
-        
-        # Determine content type from file extension
-        ext = os.path.splitext(image_path)[1].lower()
-        content_type = "image/jpeg" if ext in (".jpg", ".jpeg") else "image/png"
-
-        print(f"[Mealie] Uploading image to recipe {recipe_slug}")
-        
-        try:
-            with open(image_path, "rb") as f:
-                files = {"image": (os.path.basename(image_path), f, content_type)}
-                resp = requests.put(url, files=files, headers=headers)
-            
-            print(f"[Mealie] Image upload status: {resp.status_code}")
-            
-            if resp.status_code in (200, 201, 204):
-                print(f"[Mealie] Image uploaded successfully")
-                return True
-            else:
-                print(f"[Mealie] Image upload failed: {resp.text[:500]}")
-                return False
-        except Exception as e:
-            print(f"[Mealie] Image upload error: {e}")
-            return False

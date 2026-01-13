@@ -1,4 +1,130 @@
 from config import config
+import re
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+
+# ==============================================================================
+# HTTP Utilities
+# ==============================================================================
+
+def create_http_session() -> requests.Session:
+    """Create a requests session with retry logic and proper timeouts."""
+    session = requests.Session()
+    retry_strategy = Retry(
+        total=3,
+        backoff_factor=0.5,
+        status_forcelist=[500, 502, 503, 504],
+    )
+    adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=10, pool_maxsize=10)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
+
+
+# ==============================================================================
+# Parsing Utilities
+# ==============================================================================
+
+def coerce_num(val: str) -> float:
+    """Convert string quantity to float, handling ranges and locales.
+    
+    Examples:
+        >>> coerce_num("2.5")
+        2.5
+        >>> coerce_num("3-4")
+        3.0
+        >>> coerce_num("1,5")
+        1.5
+    """
+    if not val:
+        return 0
+    v = str(val).strip()
+    # Handle range -> take first number
+    if "-" in v:
+        v = v.split("-")[0].strip()
+    v = v.replace(",", ".")
+    try:
+        return float(v)
+    except ValueError:
+        return 0
+
+
+def parse_nutrition_value(value: str | None) -> float:
+    """Extract numeric value from nutrition string like '450 kcal' or '20 g'.
+    
+    Examples:
+        >>> parse_nutrition_value("450 kcal")
+        450.0
+        >>> parse_nutrition_value("20 g")
+        20.0
+        >>> parse_nutrition_value(None)
+        0
+    """
+    if not value:
+        return 0
+    # Extract the first number from the string
+    match = re.search(r"(\d+(?:[.,]\d+)?)", str(value))
+    if match:
+        return float(match.group(1).replace(",", "."))
+    return 0
+
+
+def extract_servings(recipe_data: dict) -> int:
+    """Extract numeric servings from recipeYield field.
+    
+    Args:
+        recipe_data: Recipe dictionary containing 'recipeYield' field.
+        
+    Returns:
+        Integer number of servings, defaults to 1 if not found.
+    """
+    ry = recipe_data.get("recipeYield") or ""
+    m = re.search(r"(\d+(?:[.,]\d+)?)", str(ry))
+    if m:
+        try:
+            return int(float(m.group(1).replace(",", ".")))
+        except ValueError:
+            pass
+    return 1
+
+
+def parse_iso_duration(duration: str) -> int:
+    """Parse ISO 8601 duration (e.g., PT30M, PT1H30M) to minutes.
+    
+    Examples:
+        >>> parse_iso_duration("PT30M")
+        30
+        >>> parse_iso_duration("PT1H30M")
+        90
+        >>> parse_iso_duration("PT2H")
+        120
+        
+    Returns:
+        Minutes as integer, 0 if parsing fails.
+    """
+    if not duration:
+        return 0
+    # Match patterns like PT1H30M, PT45M, PT2H
+    match = re.match(
+        r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", str(duration).upper()
+    )
+    if not match:
+        # Try simple numeric (assume minutes)
+        try:
+            return int(duration)
+        except (ValueError, TypeError):
+            return 0
+    hours = int(match.group(1) or 0)
+    minutes = int(match.group(2) or 0)
+    seconds = int(match.group(3) or 0)
+    return hours * 60 + minutes + (1 if seconds >= 30 else 0)
+
+
+# ==============================================================================
+# Language Utilities
+# ==============================================================================
 
 # Map language codes to full names
 _LANG_NAMES = {

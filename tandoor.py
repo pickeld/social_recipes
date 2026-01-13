@@ -1,84 +1,30 @@
+"""
+Tandoor Recipes exporter.
+
+This module provides functionality to export recipes to Tandoor Recipes.
+API documentation: https://docs.tandoor.dev/api/
+"""
+
 from config import config
 import re
-import os
 
-import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
+from recipe_exporter import RecipeExporter
+from helpers import coerce_num, parse_iso_duration, extract_servings, parse_nutrition_value
 
 
-def _create_session() -> requests.Session:
-    """Create a requests session with retry logic and proper timeouts."""
-    session = requests.Session()
-    retry_strategy = Retry(
-        total=3,
-        backoff_factor=0.5,
-        status_forcelist=[500, 502, 503, 504],
-    )
-    adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=10, pool_maxsize=10)
-    session.mount("http://", adapter)
-    session.mount("https://", adapter)
-    return session
-
-
-class Tandoor:
-    """
-    Export recipes to Tandoor Recipes.
-    API documentation: https://docs.tandoor.dev/api/
-    """
+class Tandoor(RecipeExporter):
+    """Export recipes to Tandoor Recipes."""
 
     def __init__(self):
-        self.api_key = config.TANDOOR_API_KEY
-        self.base_url = config.TANDOOR_HOST.rstrip("/")
-        # Use a session for connection reuse
-        self._session = _create_session()
-
-    def _parse_iso_duration(self, duration: str) -> int:
-        """
-        Parse ISO 8601 duration (e.g., PT30M, PT1H30M) to minutes.
-        Returns 0 if parsing fails.
-        """
-        if not duration:
-            return 0
-        # Match patterns like PT1H30M, PT45M, PT2H
-        match = re.match(
-            r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", str(duration).upper()
+        super().__init__(
+            api_key=config.TANDOOR_API_KEY,
+            base_url=config.TANDOOR_HOST,
+            name="Tandoor"
         )
-        if not match:
-            # Try simple numeric (assume minutes)
-            try:
-                return int(duration)
-            except (ValueError, TypeError):
-                return 0
-        hours = int(match.group(1) or 0)
-        minutes = int(match.group(2) or 0)
-        seconds = int(match.group(3) or 0)
-        return hours * 60 + minutes + (1 if seconds >= 30 else 0)
 
-    def _coerce_num(self, val: str) -> float:
-        """Convert string quantity to float, handling ranges and locales."""
-        if not val:
-            return 0
-        v = str(val).strip()
-        # Handle range -> take first number
-        if "-" in v:
-            v = v.split("-")[0].strip()
-        v = v.replace(",", ".")
-        try:
-            return float(v)
-        except ValueError:
-            return 0
-
-    def _extract_servings(self, recipe_data: dict) -> int:
-        """Extract numeric servings from recipeYield."""
-        ry = recipe_data.get("recipeYield") or ""
-        m = re.search(r"(\d+(?:[.,]\d+)?)", str(ry))
-        if m:
-            try:
-                return int(float(m.group(1).replace(",", ".")))
-            except ValueError:
-                pass
-        return 1
+    def _get_image_upload_url(self, recipe_id: str | int) -> str:
+        """Get the URL for image upload endpoint."""
+        return f"{self.base_url}/api/recipe/{recipe_id}/image/"
 
     def _build_ingredients(self, recipe_data: dict) -> list[dict]:
         """
@@ -122,7 +68,7 @@ class Tandoor:
                     note_parts.append(" ".join(modifiers))
                 note = " | ".join([p for p in note_parts if p]) or None
 
-                amount = self._coerce_num(qty_s)
+                amount = coerce_num(qty_s)
                 
                 # Tandoor API: food and unit must be objects with 'name' field or null
                 # Do NOT pass empty objects {} - only {"name": "value"} or null
@@ -172,7 +118,7 @@ class Tandoor:
                 food_name = ""
 
                 if m2:
-                    amount = self._coerce_num(m2.group(1) or "")
+                    amount = coerce_num(m2.group(1) or "")
                     potential_unit = (m2.group(2) or "").strip()
                     food_name = (m2.group(3) or "").strip()
                     
@@ -259,7 +205,7 @@ class Tandoor:
                             "time": 0,
                             "name": section_name[:128],
                             "show_as_header": True,
-                            "show_ingredients_table": False,  # Don't show ingredients in steps
+                            "show_ingredients_table": False,
                         }
                         steps.append(section_step)
                         order += 1
@@ -276,7 +222,7 @@ class Tandoor:
                                     "time": 0,
                                     "name": "",
                                     "show_as_header": False,
-                                    "show_ingredients_table": False,  # Don't show ingredients in steps
+                                    "show_ingredients_table": False,
                                 }
                                 steps.append(step_obj)
                                 order += 1
@@ -288,7 +234,7 @@ class Tandoor:
                                 "time": 0,
                                 "name": "",
                                 "show_as_header": False,
-                                "show_ingredients_table": False,  # Don't show ingredients in steps
+                                "show_ingredients_table": False,
                             }
                             steps.append(step_obj)
                             order += 1
@@ -305,7 +251,7 @@ class Tandoor:
                     "time": 0,
                     "name": step_name[:128] if step_name else "",
                     "show_as_header": False,
-                    "show_ingredients_table": False,  # Don't show ingredients in steps
+                    "show_ingredients_table": False,
                 }
                 steps.append(step_obj)
                 order += 1
@@ -399,16 +345,6 @@ class Tandoor:
         if not isinstance(nutrition, dict):
             return None
         
-        def parse_nutrition_value(value: str | None) -> float:
-            """Extract numeric value from nutrition string like '450 kcal' or '20 g'."""
-            if not value:
-                return 0
-            # Extract the first number from the string
-            match = re.search(r"(\d+(?:[.,]\d+)?)", str(value))
-            if match:
-                return float(match.group(1).replace(",", "."))
-            return 0
-        
         # Map Schema.org fields to Tandoor fields
         calories = parse_nutrition_value(nutrition.get("calories"))
         carbs = parse_nutrition_value(nutrition.get("carbohydrateContent"))
@@ -457,13 +393,13 @@ class Tandoor:
         description = (recipe_data.get("description", "") or "")[:512]
         
         # Servings
-        servings = self._extract_servings(recipe_data)
-        servings_text = str(recipe_data.get("recipeYield") or servings)[:32]  # max 32 chars
+        servings = extract_servings(recipe_data)
+        servings_text = str(recipe_data.get("recipeYield") or servings)[:32]
 
         # Parse times
-        prep_time = self._parse_iso_duration(recipe_data.get("prepTime", ""))
-        cook_time = self._parse_iso_duration(recipe_data.get("cookTime", ""))
-        total_time = self._parse_iso_duration(recipe_data.get("totalTime", ""))
+        prep_time = parse_iso_duration(recipe_data.get("prepTime", ""))
+        cook_time = parse_iso_duration(recipe_data.get("cookTime", ""))
+        total_time = parse_iso_duration(recipe_data.get("totalTime", ""))
 
         # working_time = prep, waiting_time = cook (or derive from total)
         working_time = prep_time
@@ -490,7 +426,7 @@ class Tandoor:
                 "time": working_time + waiting_time,
                 "name": "",
                 "show_as_header": False,
-                "show_ingredients_table": False,  # Don't show ingredients in steps, only in overview
+                "show_ingredients_table": False,
             }]
 
         # Attach all ingredients to the first step (Tandoor's model)
@@ -518,7 +454,7 @@ class Tandoor:
         nutrition = self._build_nutrition(recipe_data)
         if nutrition:
             payload["nutrition"] = nutrition
-            print(f"[Tandoor] Including nutrition: {nutrition}")
+            self._log(f"Including nutrition: {nutrition}")
         
         return payload
 
@@ -530,78 +466,25 @@ class Tandoor:
         Tandoor automatically creates units and foods when given just names,
         so no pre-creation API calls are needed.
         """
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        }
-
+        headers = self._build_headers()
         payload = self._to_tandoor_payload(recipe_data)
         create_url = f"{self.base_url}/api/recipe/"
 
-        print(f"[Tandoor] Creating recipe: {payload.get('name')}")
-        print(f"[Tandoor] POST {create_url}")
+        self._log(f"Creating recipe: {payload.get('name')}")
+        self._log(f"POST {create_url}")
 
         resp = self._session.post(create_url, json=payload, headers=headers, timeout=120)
-        print(f"[Tandoor] Response status: {resp.status_code}")
+        self._log(f"Response status: {resp.status_code}")
 
         if resp.status_code >= 400:
-            print(f"[Tandoor] Error response: {resp.text[:1000]}")
+            self._log(f"Error response: {resp.text[:1000]}")
             resp.raise_for_status()
 
         try:
             result = resp.json()
             recipe_id = result.get('id')
-            print(f"[Tandoor] Recipe created with ID: {recipe_id}")
+            self._log(f"Recipe created with ID: {recipe_id}")
             return result
         except Exception as e:
-            print(f"[Tandoor] JSON parse error: {e}")
+            self._log(f"JSON parse error: {e}")
             return {"raw": resp.text}
-
-    def upload_image(self, recipe_id: int, image_path: str) -> bool:
-        """
-        Upload an image for a recipe.
-        PUT /api/recipe/{id}/image/
-
-        Args:
-            recipe_id: The ID of the recipe to upload the image for.
-            image_path: Path to the image file (JPEG/PNG).
-
-        Returns:
-            True if upload succeeded, False otherwise.
-        """
-        if not os.path.exists(image_path):
-            print(f"[Tandoor] Image file not found: {image_path}")
-            return False
-
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Accept": "application/json",
-        }
-
-        url = f"{self.base_url}/api/recipe/{recipe_id}/image/"
-
-        # Determine content type from file extension
-        ext = os.path.splitext(image_path)[1].lower()
-        content_type = "image/jpeg" if ext in (".jpg",
-                                               ".jpeg") else "image/png"
-
-        print(f"[Tandoor] Uploading image to recipe {recipe_id}")
-
-        try:
-            with open(image_path, "rb") as f:
-                files = {"image": (os.path.basename(
-                    image_path), f, content_type)}
-                resp = self._session.put(url, files=files, headers=headers, timeout=60)
-
-            print(f"[Tandoor] Image upload status: {resp.status_code}")
-
-            if resp.status_code in (200, 201, 204):
-                print(f"[Tandoor] Image uploaded successfully")
-                return True
-            else:
-                print(f"[Tandoor] Image upload failed: {resp.text[:500]}")
-                return False
-        except Exception as e:
-            print(f"[Tandoor] Image upload error: {e}")
-            return False
