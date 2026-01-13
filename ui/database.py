@@ -9,7 +9,7 @@ import hashlib
 from contextlib import contextmanager
 
 # Import defaults from config module to avoid duplication
-from config import DEFAULTS as DEFAULT_CONFIG
+from config import DEFAULT_CONFIG
 
 # Database file path
 DB_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'social_recipes.db')
