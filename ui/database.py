@@ -8,26 +8,11 @@ import sqlite3
 import hashlib
 from contextlib import contextmanager
 
+# Import defaults from config module to avoid duplication
+from config import DEFAULTS as DEFAULT_CONFIG
+
 # Database file path
 DB_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'social_recipes.db')
-
-# Default configuration values
-DEFAULT_CONFIG = {
-    "llm_provider": "openai",
-    "openai_api_key": "",
-    "openai_model": "gpt-5-mini-2025-08-07",
-    "gemini_api_key": "",
-    "gemini_model": "gemini-2.0-flash",
-    "recipe_lang": "hebrew",
-    "mealie_api_key": "",
-    "mealie_host": "",
-    "tandoor_api_key": "",
-    "tandoor_host": "",
-    "target_language": "he",
-    "output_target": "tandoor",
-    "whisper_model": "small",
-    "confirm_before_upload": "true"
-}
 
 
 @contextmanager

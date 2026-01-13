@@ -12,7 +12,7 @@ DB_FILE = os.path.join(os.path.dirname(
     os.path.abspath(__file__)), 'social_recipes.db')
 
 # Default configuration values
-DEFAULTS = {
+DEFAULT_CONFIG = {
     "llm_provider": "openai",
     "openai_api_key": "",
     "openai_model": "gpt-5-mini-2025-08-07",
@@ -43,7 +43,7 @@ def get_db():
 
 def _get_config_from_db() -> dict:
     """Load all configuration values from SQLite database."""
-    config = DEFAULTS.copy()
+    config = DEFAULT_CONFIG.copy()
 
     # Only try to read from DB if it exists
     if not os.path.exists(DB_FILE):
@@ -79,59 +79,59 @@ class Config:
 
     @property
     def LLM_PROVIDER(self) -> str:
-        return self._get('llm_provider', DEFAULTS['llm_provider'])
+        return self._get('llm_provider', DEFAULT_CONFIG['llm_provider'])
 
     @property
     def OPENAI_API_KEY(self) -> str:
-        return self._get('openai_api_key', DEFAULTS['openai_api_key'])
+        return self._get('openai_api_key', DEFAULT_CONFIG['openai_api_key'])
 
     @property
     def OPENAI_MODEL(self) -> str:
-        return self._get('openai_model', DEFAULTS['openai_model'])
+        return self._get('openai_model', DEFAULT_CONFIG['openai_model'])
 
     @property
     def GEMINI_API_KEY(self) -> str:
-        return self._get('gemini_api_key', DEFAULTS['gemini_api_key'])
+        return self._get('gemini_api_key', DEFAULT_CONFIG['gemini_api_key'])
 
     @property
     def GEMINI_MODEL(self) -> str:
-        return self._get('gemini_model', DEFAULTS['gemini_model'])
+        return self._get('gemini_model', DEFAULT_CONFIG['gemini_model'])
 
     @property
     def RECIPE_LANG(self) -> str:
-        return self._get('recipe_lang', DEFAULTS['recipe_lang'])
+        return self._get('recipe_lang', DEFAULT_CONFIG['recipe_lang'])
 
     @property
     def MEALIE_API_KEY(self) -> str:
-        return self._get('mealie_api_key', DEFAULTS['mealie_api_key'])
+        return self._get('mealie_api_key', DEFAULT_CONFIG['mealie_api_key'])
 
     @property
     def MEALIE_HOST(self) -> str:
-        return self._get('mealie_host', DEFAULTS['mealie_host'])
+        return self._get('mealie_host', DEFAULT_CONFIG['mealie_host'])
 
     @property
     def TANDOOR_API_KEY(self) -> str:
-        return self._get('tandoor_api_key', DEFAULTS['tandoor_api_key'])
+        return self._get('tandoor_api_key', DEFAULT_CONFIG['tandoor_api_key'])
 
     @property
     def TANDOOR_HOST(self) -> str:
-        return self._get('tandoor_host', DEFAULTS['tandoor_host'])
+        return self._get('tandoor_host', DEFAULT_CONFIG['tandoor_host'])
 
     @property
     def TARGET_LANGUAGE(self) -> str:
-        return self._get('target_language', DEFAULTS['target_language'])
+        return self._get('target_language', DEFAULT_CONFIG['target_language'])
 
     @property
     def OUTPUT_TARGET(self) -> str:
-        return self._get('output_target', DEFAULTS['output_target'])
+        return self._get('output_target', DEFAULT_CONFIG['output_target'])
 
     @property
     def WHISPER_MODEL(self) -> str:
-        return self._get('whisper_model', DEFAULTS['whisper_model'])
+        return self._get('whisper_model', DEFAULT_CONFIG['whisper_model'])
 
     @property
     def CONFIRM_BEFORE_UPLOAD(self) -> bool:
-        value = self._get('confirm_before_upload', DEFAULTS['confirm_before_upload'])
+        value = self._get('confirm_before_upload', DEFAULT_CONFIG['confirm_before_upload'])
         return value.lower() in ('true', '1', 'yes', 'on')
 
     def reload(self):
