@@ -6,10 +6,12 @@
   "start_url": "/?source=pwa",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "background_color": "#0f172a",
   "theme_color": "#6366f1",
   "orientation": "portrait-primary",
   "prefer_related_applications": false,
+  "categories": ["food", "lifestyle", "utilities"],
   "icons": [
     {
       "src": "/static/icons/icon-72x72.png",
@@ -74,8 +76,7 @@
   ],
   "share_target": {
     "action": "/share",
-    "method": "POST",
-    "enctype": "application/x-www-form-urlencoded",
+    "method": "GET",
     "params": {
       "title": "title",
       "text": "text",
