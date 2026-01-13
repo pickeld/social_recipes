@@ -259,7 +259,7 @@ class Tandoor:
                             "time": 0,
                             "name": section_name[:128],
                             "show_as_header": True,
-                            "show_ingredients_table": False,
+                            "show_ingredients_table": False,  # Don't show ingredients in steps
                         }
                         steps.append(section_step)
                         order += 1
@@ -276,7 +276,7 @@ class Tandoor:
                                     "time": 0,
                                     "name": "",
                                     "show_as_header": False,
-                                    "show_ingredients_table": True,
+                                    "show_ingredients_table": False,  # Don't show ingredients in steps
                                 }
                                 steps.append(step_obj)
                                 order += 1
@@ -288,7 +288,7 @@ class Tandoor:
                                 "time": 0,
                                 "name": "",
                                 "show_as_header": False,
-                                "show_ingredients_table": True,
+                                "show_ingredients_table": False,  # Don't show ingredients in steps
                             }
                             steps.append(step_obj)
                             order += 1
@@ -305,7 +305,7 @@ class Tandoor:
                     "time": 0,
                     "name": step_name[:128] if step_name else "",
                     "show_as_header": False,
-                    "show_ingredients_table": True,
+                    "show_ingredients_table": False,  # Don't show ingredients in steps
                 }
                 steps.append(step_obj)
                 order += 1
@@ -447,7 +447,7 @@ class Tandoor:
                 "time": working_time + waiting_time,
                 "name": "",
                 "show_as_header": False,
-                "show_ingredients_table": True,
+                "show_ingredients_table": False,  # Don't show ingredients in steps, only in overview
             }]
 
         # Attach all ingredients to the first step (Tandoor's model)

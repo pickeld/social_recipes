@@ -159,3 +159,6 @@ tmp/
 
 # Social Recipes database
 social_recipes.db
+
+# Flask secret key (auto-generated for session persistence)
+.flask_secret_key

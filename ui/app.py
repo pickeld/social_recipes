@@ -25,7 +25,32 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Import database module
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('FLASK_SECRET_KEY', secrets.token_hex(32))
+
+# Secret key for session cookies - MUST be persistent across restarts
+# Generate a stable key based on a file if FLASK_SECRET_KEY is not set
+def _get_or_create_secret_key():
+    """Get secret key from env or generate and persist one."""
+    env_key = os.environ.get('FLASK_SECRET_KEY')
+    if env_key:
+        return env_key
+    
+    # Store the key in a file so it persists across restarts
+    key_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.flask_secret_key')
+    if os.path.exists(key_file):
+        with open(key_file, 'r') as f:
+            return f.read().strip()
+    
+    # Generate and save a new key
+    new_key = secrets.token_hex(32)
+    try:
+        with open(key_file, 'w') as f:
+            f.write(new_key)
+        os.chmod(key_file, 0o600)  # Restrict permissions
+    except (IOError, OSError):
+        pass  # If we can't write, still use the key for this session
+    return new_key
+
+app.secret_key = _get_or_create_secret_key()
 
 # Configure session cookie settings
 app.config['SESSION_COOKIE_HTTPONLY'] = True
