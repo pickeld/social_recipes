@@ -89,7 +89,25 @@ def login_required(f):
 @login_required
 def index():
     """Main page with URL input and progress display."""
-    return render_template('index.html')
+    # Check for shared URL from PWA share_target
+    shared_url = request.args.get('url') or request.args.get('text') or ''
+    return render_template('index.html', shared_url=shared_url)
+
+
+@app.route('/share')
+@login_required
+def share():
+    """Handle shared URLs from PWA share_target."""
+    # Get shared content from query params
+    shared_url = request.args.get('url') or request.args.get('text') or ''
+    shared_title = request.args.get('title', '')
+    
+    # Extract URL from text if it contains one
+    if not shared_url and shared_title:
+        shared_url = shared_title
+    
+    # Redirect to main page with the shared URL
+    return redirect(url_for('index', url=shared_url))
 
 
 @app.route('/login', methods=['GET', 'POST'])
