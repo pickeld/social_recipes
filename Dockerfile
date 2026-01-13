@@ -23,6 +23,7 @@ EXPOSE 5006
 
 # Default environment variables
 ENV FLASK_DEBUG=false
+ENV PYTHONPATH=/app
 
 # Run the Flask application
 CMD ["python", "ui/app.py"]

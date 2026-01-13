@@ -3,26 +3,22 @@ Social Recipes Web UI
 A Flask-based web interface for video recipe extraction with authentication and configuration management.
 """
 
+import os
+import sys
+import base64
+import secrets
+import threading
+from datetime import timedelta
+from functools import wraps
+
+from dotenv import load_dotenv
+from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
+from flask_socketio import SocketIO, emit
+
 from database import (
     init_db, load_config, save_config,
     verify_user, update_password, hash_password
 )
-from flask_socketio import SocketIO, emit
-from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
-from dotenv import load_dotenv
-from functools import wraps
-from datetime import timedelta
-import threading
-import base64
-import secrets
-import sys
-import os
-
-
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-# Import database module
 
 app = Flask(__name__)
 
