@@ -14,8 +14,8 @@ services:
       - PORT=5006
       - FLASK_SECRET_KEY=change-me-to-a-random-secret-key
     volumes:
-      - social-recipes/data:/app/data
-      - social-recipes/tmp:/tmp
+      - social-recipes:/app/data
+      - social-recipes:/tmp
 
 volumes:
   social-recipes:
