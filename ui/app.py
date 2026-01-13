@@ -95,9 +95,13 @@ def index():
 
 
 @app.route('/share', methods=['GET', 'POST'])
-@login_required
 def share():
-    """Handle shared URLs from PWA share_target."""
+    """Handle shared URLs from PWA share_target.
+    
+    NOTE: This route intentionally does NOT require login so that Android's
+    share_target can POST data before authentication. The URL is saved to
+    session first, then user is redirected to login if needed.
+    """
     # Get shared content from POST form data (Android) or query params (fallback)
     if request.method == 'POST':
         shared_url = request.form.get('url') or request.form.get('text') or ''
@@ -110,8 +114,14 @@ def share():
     if not shared_url and shared_title:
         shared_url = shared_title
     
-    # Store in session and redirect to main page
+    # Store in session BEFORE checking auth - this preserves the URL through login
     session['shared_url'] = shared_url
+    
+    # If user is not logged in, redirect to login (URL is preserved in session)
+    if 'user' not in session:
+        return redirect(url_for('login'))
+    
+    # User is logged in, redirect to main page
     return redirect(url_for('index'))
 
 
