@@ -68,17 +68,83 @@
     
     <!-- PWA Service Worker Registration -->
     <script>
+        // Store install prompt for later use
+        let deferredPrompt = null;
+        
+        // Handle beforeinstallprompt event (for install banner)
+        window.addEventListener('beforeinstallprompt', (e) => {
+            console.log('[PWA] beforeinstallprompt fired');
+            // Prevent Chrome 67 and earlier from automatically showing the prompt
+            e.preventDefault();
+            // Stash the event so it can be triggered later
+            deferredPrompt = e;
+            // Optionally show your own install button here
+            console.log('[PWA] App can be installed');
+        });
+        
+        // Log when PWA is installed
+        window.addEventListener('appinstalled', (e) => {
+            console.log('[PWA] App was installed successfully');
+            deferredPrompt = null;
+        });
+        
+        // Register service worker
         if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/sw.js')
-                    .then((registration) => {
-                        console.log('ServiceWorker registration successful:', registration.scope);
-                    })
-                    .catch((error) => {
-                        console.log('ServiceWorker registration failed:', error);
+            window.addEventListener('load', async () => {
+                try {
+                    // Unregister any old service workers first to ensure clean install
+                    const registrations = await navigator.serviceWorker.getRegistrations();
+                    for (const registration of registrations) {
+                        if (registration.scope !== window.location.origin + '/') {
+                            await registration.unregister();
+                            console.log('[SW] Unregistered old service worker:', registration.scope);
+                        }
+                    }
+                    
+                    const registration = await navigator.serviceWorker.register('/sw.js', {
+                        scope: '/'
                     });
+                    
+                    console.log('[SW] Registration successful, scope:', registration.scope);
+                    
+                    // Check for updates
+                    registration.addEventListener('updatefound', () => {
+                        const newWorker = registration.installing;
+                        console.log('[SW] New service worker installing...');
+                        
+                        newWorker.addEventListener('statechange', () => {
+                            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                console.log('[SW] New content available, refresh to update');
+                            }
+                        });
+                    });
+                    
+                } catch (error) {
+                    console.error('[SW] Registration failed:', error);
+                }
             });
+            
+            // Handle controller change (new service worker activated)
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+                console.log('[SW] Controller changed, new service worker active');
+            });
+        } else {
+            console.warn('[SW] Service workers not supported');
         }
+        
+        // Function to trigger install prompt (can be called from UI button)
+        window.installPWA = async () => {
+            if (!deferredPrompt) {
+                console.log('[PWA] No install prompt available');
+                return false;
+            }
+            
+            deferredPrompt.prompt();
+            const { outcome } = await deferredPrompt.userChoice;
+            console.log('[PWA] User response:', outcome);
+            deferredPrompt = null;
+            return outcome === 'accepted';
+        };
     </script>
     
     {% block extra_scripts %}{% endblock %}

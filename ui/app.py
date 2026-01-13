@@ -12,7 +12,7 @@ from datetime import timedelta
 from functools import wraps
 
 from dotenv import load_dotenv
-from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
+from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, make_response
 from flask_socketio import SocketIO, emit
 
 from database import (
@@ -22,15 +22,22 @@ from database import (
 
 app = Flask(__name__)
 
-# Serve manifest.json with correct MIME type
+# Serve manifest.json with correct MIME type and headers for PWA
 @app.route('/manifest.json')
 def serve_manifest():
-    return app.send_static_file('manifest.json')
+    response = make_response(app.send_static_file('manifest.json'))
+    response.headers['Content-Type'] = 'application/manifest+json'
+    response.headers['Cache-Control'] = 'public, max-age=3600'
+    return response
 
-# Serve service worker with correct MIME type
+# Serve service worker with correct MIME type and scope
 @app.route('/sw.js')
 def serve_sw():
-    return app.send_static_file('sw.js')
+    response = make_response(app.send_static_file('sw.js'))
+    response.headers['Content-Type'] = 'application/javascript'
+    response.headers['Service-Worker-Allowed'] = '/'
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    return response
 
 # Secret key for session cookies - MUST be persistent across restarts
 # Generate a stable key based on a file if FLASK_SECRET_KEY is not set
