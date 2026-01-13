@@ -1,8 +1,10 @@
 {
+  "id": "/",
   "name": "Social Recipes",
   "short_name": "Recipes",
   "description": "Extract and save recipes from social media videos",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#0f172a",
   "theme_color": "#6366f1",
@@ -59,7 +61,8 @@
   ],
   "share_target": {
     "action": "/share",
-    "method": "GET",
+    "method": "POST",
+    "enctype": "application/x-www-form-urlencoded",
     "params": {
       "title": "title",
       "text": "text",
