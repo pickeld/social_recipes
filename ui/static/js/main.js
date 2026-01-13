@@ -22,6 +22,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const previewTarget = document.getElementById('preview-target');
     const previewImageContainer = document.getElementById('preview-image-container');
     const previewImage = document.getElementById('preview-image');
+    const imageCandidatesGrid = document.getElementById('image-candidates-grid');
     const previewTitle = document.getElementById('preview-title');
     const previewDescription = document.getElementById('preview-description');
     const previewIngredients = document.getElementById('preview-ingredients');
@@ -32,6 +33,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Track current processing state
     let isProcessing = false;
     let currentUploadId = null;
+    let selectedImageIndex = 0;
     
     // Socket.IO event handlers
     socket.on('connect', function() {
@@ -86,7 +88,10 @@ document.addEventListener('DOMContentLoaded', function() {
     if (confirmUploadBtn) {
         confirmUploadBtn.addEventListener('click', function() {
             if (currentUploadId) {
-                socket.emit('confirm_upload', { upload_id: currentUploadId });
+                socket.emit('confirm_upload', {
+                    upload_id: currentUploadId,
+                    selected_image_index: selectedImageIndex
+                });
                 hidePreviewModal();
                 addLog('info', 'Upload confirmed, uploading recipe...');
             }
@@ -367,18 +372,61 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         
         currentUploadId = data.upload_id;
+        selectedImageIndex = data.best_image_index || 0;
         
         // Set target name
         if (previewTarget) {
             previewTarget.textContent = data.output_target || 'recipe manager';
         }
         
-        // Set recipe image if available
-        if (data.image_data && previewImage && previewImageContainer) {
-            previewImage.src = 'data:image/jpeg;base64,' + data.image_data;
-            previewImageContainer.style.display = 'block';
-        } else if (previewImageContainer) {
-            previewImageContainer.style.display = 'none';
+        // Build image candidates grid
+        if (imageCandidatesGrid && data.candidate_images && data.candidate_images.length > 0) {
+            imageCandidatesGrid.innerHTML = '';
+            imageCandidatesGrid.style.display = 'grid';
+            
+            data.candidate_images.forEach((candidate, idx) => {
+                const imgWrapper = document.createElement('div');
+                imgWrapper.className = 'image-candidate' + (candidate.is_best ? ' is-best' : '') + (idx === selectedImageIndex ? ' selected' : '');
+                imgWrapper.dataset.index = candidate.index;
+                
+                const img = document.createElement('img');
+                img.src = 'data:image/jpeg;base64,' + candidate.data;
+                img.alt = 'Dish candidate ' + (candidate.index + 1);
+                
+                // Add AI recommendation badge for the best image
+                if (candidate.is_best) {
+                    const badge = document.createElement('span');
+                    badge.className = 'ai-badge';
+                    badge.innerHTML = '<i class="fas fa-star"></i> AI Pick';
+                    imgWrapper.appendChild(badge);
+                }
+                
+                imgWrapper.appendChild(img);
+                
+                // Add click handler for selection
+                imgWrapper.addEventListener('click', function() {
+                    selectImage(candidate.index, candidate.data);
+                });
+                
+                imageCandidatesGrid.appendChild(imgWrapper);
+            });
+            
+            // Show the selected (best) image in the main preview
+            if (data.image_data && previewImage && previewImageContainer) {
+                previewImage.src = 'data:image/jpeg;base64,' + data.image_data;
+                previewImageContainer.style.display = 'block';
+            }
+        } else {
+            // No candidates, just show single image if available
+            if (imageCandidatesGrid) {
+                imageCandidatesGrid.style.display = 'none';
+            }
+            if (data.image_data && previewImage && previewImageContainer) {
+                previewImage.src = 'data:image/jpeg;base64,' + data.image_data;
+                previewImageContainer.style.display = 'block';
+            } else if (previewImageContainer) {
+                previewImageContainer.style.display = 'none';
+            }
         }
         
         // Set recipe title
@@ -420,6 +468,32 @@ document.addEventListener('DOMContentLoaded', function() {
         document.body.style.overflow = 'hidden';
         
         addLog('info', 'Recipe preview ready - please confirm or cancel upload');
+    }
+    
+    /**
+     * Select an image from the candidates
+     */
+    function selectImage(index, imageData) {
+        selectedImageIndex = index;
+        
+        // Update main preview image
+        if (previewImage && imageData) {
+            previewImage.src = 'data:image/jpeg;base64,' + imageData;
+        }
+        
+        // Update selection state in grid
+        if (imageCandidatesGrid) {
+            const candidates = imageCandidatesGrid.querySelectorAll('.image-candidate');
+            candidates.forEach(candidate => {
+                if (parseInt(candidate.dataset.index) === index) {
+                    candidate.classList.add('selected');
+                } else {
+                    candidate.classList.remove('selected');
+                }
+            });
+        }
+        
+        addLog('info', 'Selected image ' + (index + 1) + ' as dish photo');
     }
     
     /**

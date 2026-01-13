@@ -93,8 +93,15 @@
         </div>
         
         <div class="modal-body">
-            <div class="preview-image-container" id="preview-image-container" style="display: none;">
-                <img id="preview-image" src="" alt="Dish preview">
+            <div class="preview-image-section">
+                <h4><i class="fas fa-image"></i> Select Dish Photo</h4>
+                <p class="image-selection-hint">Click to select the best photo for your recipe (AI recommendation marked with <i class="fas fa-star"></i>)</p>
+                
+                <div class="preview-image-container" id="preview-image-container" style="display: none;">
+                    <img id="preview-image" src="" alt="Selected dish photo">
+                </div>
+                
+                <div class="image-candidates-grid" id="image-candidates-grid"></div>
             </div>
             
             <div class="preview-content">

@@ -160,3 +160,48 @@ def extract_dish_image(video_path: str) -> str | None:
     """
     extractor = ImageExtractor(video_path)
     return extractor.extract_best_image()
+
+
+def extract_dish_image_candidates(video_path: str, num_candidates: int = 12) -> dict:
+    """
+    Extract dish image candidates from a video for user selection.
+    
+    Args:
+        video_path: Path to the video file.
+        num_candidates: Number of candidate frames to extract.
+    
+    Returns:
+        Dictionary containing:
+        - 'best_image': Path to the AI-selected best image
+        - 'best_index': Index of the best image in candidates
+        - 'candidates': List of paths to all candidate images
+    """
+    extractor = ImageExtractor(video_path)
+    
+    # Extract frames
+    frames = extractor._extract_frames_weighted_end(num_candidates)
+    if not frames:
+        return {'best_image': None, 'best_index': 0, 'candidates': []}
+    
+    # Use LLM to select the best frame
+    try:
+        from llm_providers import get_image_selector
+        selector = get_image_selector()
+        best_frame_idx = selector.select_best_frame(frames)
+    except Exception as e:
+        print(f"[ImageExtractor] LLM selection failed: {e}")
+        best_frame_idx = len(frames) - 1  # Fallback to last frame
+    
+    if best_frame_idx is None:
+        best_frame_idx = len(frames) - 1
+    
+    # Create enhanced version of the best frame
+    best_frame = frames[best_frame_idx]
+    output_path = os.path.join(extractor.dish_dir, "dish.jpg")
+    extractor._enhance_frame(best_frame, output_path)
+    
+    return {
+        'best_image': output_path,
+        'best_index': best_frame_idx,
+        'candidates': frames
+    }

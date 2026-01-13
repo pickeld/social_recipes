@@ -193,7 +193,7 @@ def process_video_task(url):
         from video_downloader import VideoDownloader
         from transcriber import Transcriber
         from chef import Chef
-        from image_extractor import extract_dish_image
+        from image_extractor import extract_dish_image_candidates
 
         # Reload config to get latest values from database
         config.reload()
@@ -212,7 +212,7 @@ def process_video_task(url):
         if vid_id is None:
             emit_progress('error', 'Failed to download video', 100)
             return
-        dish_dir = os.path.join("tmp", vid_id)
+        dish_dir = os.path.join("/tmp", vid_id)
         emit_progress('download', 'Video downloaded successfully', 30)
 
         # Step 3: Transcribe audio
@@ -258,20 +258,34 @@ def process_video_task(url):
 === ON-SCREEN TEXT (ingredients, instructions, etc.) ===
 {visual_text}"""
 
-        # Step 5: Extract dish image
-        emit_progress('image', 'Extracting dish image...', 70)
+        # Step 5: Extract dish image candidates
+        emit_progress('image', 'Extracting dish image candidates...', 70)
         image_path = None
+        image_candidates = []
+        best_image_index = 0
         image_cache = os.path.join(dish_dir, "dish.jpg")
-        if os.path.exists(image_cache):
-            emit_progress('image', 'Using cached dish image', 75)
+        frames_dir = os.path.join(dish_dir, "dish_frames")
+        
+        # Check if we have cached candidates
+        if os.path.exists(frames_dir) and os.path.exists(image_cache):
+            emit_progress('image', 'Using cached dish images', 75)
             image_path = image_cache
+            # Load all cached candidate images
+            candidate_files = sorted([
+                os.path.join(frames_dir, f) for f in os.listdir(frames_dir)
+                if f.startswith('dish_candidate_') and f.endswith('.jpg')
+            ])
+            image_candidates = candidate_files
         else:
             try:
-                image_path = extract_dish_image(video_path)
+                result = extract_dish_image_candidates(video_path)
+                image_path = result.get('best_image')
+                image_candidates = result.get('candidates', [])
+                best_image_index = result.get('best_index', 0)
             except Exception as e:
                 emit_progress(
                     'image', f'Warning: Could not extract image: {e}', 75)
-        emit_progress('image', 'Image extracted', 80)
+        emit_progress('image', 'Image candidates extracted', 80)
 
         # Step 6: Create recipe with AI
         emit_progress('evaluate', 'Creating recipe with AI...', 85)
@@ -290,11 +304,23 @@ def process_video_task(url):
             # Show preview and wait for user confirmation
             emit_progress('preview', 'Waiting for your confirmation...', 90)
 
-            # Prepare image data for preview if available
+            # Prepare image data for preview if available (best image first, then candidates)
             image_data = None
             if image_path and os.path.exists(image_path):
                 with open(image_path, 'rb') as f:
                     image_data = base64.b64encode(f.read()).decode('utf-8')
+            
+            # Prepare all candidate images as base64
+            candidate_images_data = []
+            for idx, candidate_path in enumerate(image_candidates):
+                if os.path.exists(candidate_path):
+                    with open(candidate_path, 'rb') as f:
+                        candidate_images_data.append({
+                            'index': idx,
+                            'data': base64.b64encode(f.read()).decode('utf-8'),
+                            'path': candidate_path,
+                            'is_best': idx == best_image_index
+                        })
 
             # Create event for waiting (using threading.Event)
             confirm_event = threading.Event()
@@ -303,16 +329,20 @@ def process_video_task(url):
             pending_uploads[upload_id] = {
                 'recipe': recipe_data,
                 'image_path': image_path,
+                'image_candidates': image_candidates,
                 'output_target': config.OUTPUT_TARGET,
                 'event': confirm_event,
-                'confirmed': None
+                'confirmed': None,
+                'selected_image_index': best_image_index  # Default to AI-selected best
             }
 
-            # Send preview to client
+            # Send preview to client with all candidate images
             socketio.emit('recipe_preview', {
                 'upload_id': upload_id,
                 'recipe': recipe_data,
                 'image_data': image_data,
+                'candidate_images': candidate_images_data,
+                'best_image_index': best_image_index,
                 'output_target': config.OUTPUT_TARGET
             })
 
@@ -331,6 +361,11 @@ def process_video_task(url):
                 socketio.emit('recipe_cancelled', {
                               'message': 'Recipe upload was cancelled'})
                 return
+            
+            # Use the user-selected image if available
+            selected_idx = pending_data.get('selected_image_index', best_image_index)
+            if image_candidates and 0 <= selected_idx < len(image_candidates):
+                image_path = image_candidates[selected_idx]
 
             emit_progress(
                 'upload', f'Uploading to {config.OUTPUT_TARGET}...', 95)
@@ -378,8 +413,12 @@ def handle_connect():
 def handle_confirm_upload(data):
     """Handle user confirmation of recipe upload."""
     upload_id = data.get('upload_id')
+    selected_image_index = data.get('selected_image_index')
     if upload_id and upload_id in pending_uploads:
         pending_uploads[upload_id]['confirmed'] = True
+        # Store the user's selected image index if provided
+        if selected_image_index is not None:
+            pending_uploads[upload_id]['selected_image_index'] = selected_image_index
         pending_uploads[upload_id]['event'].set()  # threading.Event uses set()
 
 
