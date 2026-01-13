@@ -19,7 +19,7 @@
     <link rel="apple-touch-icon" sizes="144x144" href="{{ url_for('static', filename='icons/icon-144x144.png') }}">
     
     <!-- PWA Manifest -->
-    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+    <link rel="manifest" href="/manifest.json">
     
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -69,7 +69,7 @@
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/static/sw.js')
+                navigator.serviceWorker.register('/sw.js')
                     .then((registration) => {
                         console.log('ServiceWorker registration successful:', registration.scope);
                     })
