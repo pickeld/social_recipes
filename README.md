@@ -1,7 +1,8 @@
 # Social Recipes
 
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
-[![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://www.docker.com/)
+[![Docker Hub](https://img.shields.io/docker/v/pickeld/social_recipes?label=Docker%20Hub&logo=docker)](https://hub.docker.com/r/pickeld/social_recipes)
+[![Docker Pulls](https://img.shields.io/docker/pulls/pickeld/social_recipes?logo=docker)](https://hub.docker.com/r/pickeld/social_recipes)
 [![Flask](https://img.shields.io/badge/Flask-Web_UI-green.svg)](https://flask.palletsprojects.com/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -40,24 +41,49 @@ Social Recipes is a Python application that:
 
 ### Using Docker (Recommended)
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/yourusername/social_recipes.git
-   cd social_recipes
-   ```
+**Option 1: Pull from Docker Hub (Easiest)**
 
-2. Configure the environment:
-   ```bash
-   # Set a secure secret key for sessions
-   export FLASK_SECRET_KEY="your-random-secret-key-here"
-   ```
+```bash
+docker run -d \
+  --name social-recipes \
+  -p 5006:5006 \
+  -e FLASK_SECRET_KEY="your-secure-secret-key" \
+  -v social-recipes-data:/app/data \
+  pickeld/social_recipes:latest
+```
 
-3. Build and run with Docker Compose:
-   ```bash
-   docker-compose up -d
-   ```
+Access the web UI at `http://localhost:5006`
 
-4. Access the web UI at `http://localhost:5006`
+**Option 2: Using Docker Compose**
+
+Create a `docker-compose.yml` file:
+
+```yaml
+version: "3.8"
+
+services:
+  social-recipes:
+    image: pickeld/social_recipes:latest
+    container_name: social-recipes
+    restart: unless-stopped
+    ports:
+      - "5006:5006"
+    environment:
+      - FLASK_SECRET_KEY=your-secure-secret-key
+    volumes:
+      - social-recipes-data:/app/data
+
+volumes:
+  social-recipes-data:
+```
+
+Then run:
+
+```bash
+docker-compose up -d
+```
+
+Access the web UI at `http://localhost:5006`
 
 ### Manual Installation
 
@@ -172,6 +198,18 @@ social_recipes/
 
 ## Docker Deployment
 
+### Docker Hub Image
+
+The official image is available on Docker Hub: [`pickeld/social_recipes`](https://hub.docker.com/r/pickeld/social_recipes)
+
+```bash
+# Pull the latest image
+docker pull pickeld/social_recipes:latest
+
+# Or pull a specific version
+docker pull pickeld/social_recipes:v1.0.0
+```
+
 ### Environment Variables
 
 | Variable | Description | Default |
@@ -181,14 +219,14 @@ social_recipes/
 | `FLASK_SECRET_KEY` | Secret key for session cookies | Auto-generated |
 | `FLASK_DEBUG` | Enable debug mode | `false` |
 
-### Docker Compose
+### Docker Compose (Using Docker Hub)
 
 ```yaml
 version: "3.8"
 
 services:
   social-recipes:
-    build: .
+    image: pickeld/social_recipes:latest
     container_name: social-recipes
     restart: unless-stopped
     ports:
@@ -198,13 +236,19 @@ services:
       - PORT=5006
       - FLASK_SECRET_KEY=your-secure-secret-key
     volumes:
-      # Persist database and downloaded videos
-      - ./data:/app/data
+      - social-recipes-data:/app/data
+
+volumes:
+  social-recipes-data:
 ```
 
-### Building the Image
+### Building from Source
+
+If you prefer to build the image yourself:
 
 ```bash
+git clone https://github.com/pickeld/social_recipes.git
+cd social_recipes
 docker build -t social-recipes .
 docker run -p 5006:5006 -e FLASK_SECRET_KEY="your-secret" social-recipes
 ```
