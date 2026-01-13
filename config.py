@@ -26,7 +26,8 @@ DEFAULT_CONFIG = {
     "target_language": "he",
     "output_target": "tandoor",
     "whisper_model": "small",
-    "confirm_before_upload": "true"
+    "confirm_before_upload": "true",
+    "hf_token": ""
 }
 
 
@@ -133,6 +134,10 @@ class Config:
     def CONFIRM_BEFORE_UPLOAD(self) -> bool:
         value = self._get('confirm_before_upload', DEFAULT_CONFIG['confirm_before_upload'])
         return value.lower() in ('true', '1', 'yes', 'on')
+
+    @property
+    def HF_TOKEN(self) -> str:
+        return self._get('hf_token', DEFAULT_CONFIG['hf_token'])
 
     def reload(self):
         """Reload configuration from database."""

@@ -125,6 +125,13 @@
                 </select>
                 <small class="form-hint">Larger models are more accurate but slower. 'Small' is recommended for mixed-language content.</small>
             </div>
+            
+            <div class="form-group">
+                <label for="hf_token">HuggingFace Token</label>
+                <input type="password" id="hf_token" name="hf_token"
+                       value="{{ config.hf_token }}" placeholder="hf_...">
+                <small class="form-hint">Optional. Enables faster model downloads and higher rate limits. Get one at <a href="https://huggingface.co/settings/tokens" target="_blank">huggingface.co/settings/tokens</a></small>
+            </div>
         </div>
         
         <!-- Upload Settings -->

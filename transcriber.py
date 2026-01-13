@@ -43,6 +43,9 @@ class Transcriber:
 
     def _load_model(self):
         if self.model is None:
+            # Set HF_TOKEN for authenticated HuggingFace Hub requests
+            if config.HF_TOKEN:
+                os.environ["HF_TOKEN"] = config.HF_TOKEN
             self.model = WhisperModel(
                 self.model_size, device=self.device, compute_type=self.compute_type)
 
