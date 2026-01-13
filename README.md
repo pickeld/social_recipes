@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="ui/static/icons/icon-192x192.png" alt="Social Recipes" width="120" height="120">
+</p>
+
 # Social Recipes
 
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)

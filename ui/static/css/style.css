@@ -290,6 +290,20 @@ main.with-sidebar {
     margin-bottom: 1rem;
 }
 
+.login-header .logo-image {
+    width: 120px;
+    height: 120px;
+    margin-bottom: 1rem;
+    border-radius: 24px;
+}
+
+.header-logo {
+    width: 80px;
+    height: 80px;
+    margin-bottom: 0.5rem;
+    border-radius: 16px;
+}
+
 .login-header h1 {
     font-size: 1.75rem;
     margin-bottom: 0.5rem;
