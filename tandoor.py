@@ -383,6 +383,49 @@ class Tandoor:
         
         return keywords
 
+    def _build_nutrition(self, recipe_data: dict) -> dict | None:
+        """
+        Build Tandoor nutrition object from Schema.org NutritionInformation.
+        
+        According to Tandoor API (v2.3.6) NutritionInformation schema:
+        - calories: number (required)
+        - carbohydrates: number (required)
+        - fats: number (required)
+        - proteins: number (required)
+        
+        All values are per serving.
+        """
+        nutrition = recipe_data.get("nutrition")
+        if not isinstance(nutrition, dict):
+            return None
+        
+        def parse_nutrition_value(value: str | None) -> float:
+            """Extract numeric value from nutrition string like '450 kcal' or '20 g'."""
+            if not value:
+                return 0
+            # Extract the first number from the string
+            match = re.search(r"(\d+(?:[.,]\d+)?)", str(value))
+            if match:
+                return float(match.group(1).replace(",", "."))
+            return 0
+        
+        # Map Schema.org fields to Tandoor fields
+        calories = parse_nutrition_value(nutrition.get("calories"))
+        carbs = parse_nutrition_value(nutrition.get("carbohydrateContent"))
+        fats = parse_nutrition_value(nutrition.get("fatContent"))
+        proteins = parse_nutrition_value(nutrition.get("proteinContent"))
+        
+        # Only return nutrition if we have at least calories
+        if calories > 0:
+            return {
+                "calories": calories,
+                "carbohydrates": carbs,
+                "fats": fats,
+                "proteins": proteins,
+            }
+        
+        return None
+
     def _to_tandoor_payload(self, recipe_data: dict) -> dict:
         """
         Map Schema.org style recipe into Tandoor API expected fields.
@@ -470,6 +513,12 @@ class Tandoor:
         # Add keywords if any were extracted
         if keywords:
             payload["keywords"] = keywords
+        
+        # Add nutrition if available
+        nutrition = self._build_nutrition(recipe_data)
+        if nutrition:
+            payload["nutrition"] = nutrition
+            print(f"[Tandoor] Including nutrition: {nutrition}")
         
         return payload
 

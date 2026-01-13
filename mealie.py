@@ -21,6 +21,56 @@ class Mealie:
         except ValueError:
             return 0
 
+    def _parse_nutrition_value(self, value: str | None) -> float:
+        """Extract numeric value from nutrition string like '450 kcal' or '20 g'."""
+        if not value:
+            return 0
+        # Extract the first number from the string
+        match = re.search(r"(\d+(?:[.,]\d+)?)", str(value))
+        if match:
+            return float(match.group(1).replace(",", "."))
+        return 0
+
+    def _build_nutrition(self, recipe_data: dict) -> dict | None:
+        """
+        Build Mealie nutrition object from Schema.org NutritionInformation.
+        
+        Mealie RecipeNutrition schema supports:
+        - calories: string (e.g., "450 kcal")
+        - fatContent: string (e.g., "20 g")
+        - proteinContent: string (e.g., "15 g")
+        - carbohydrateContent: string (e.g., "50 g")
+        - fiberContent: string (e.g., "5 g")
+        - sodiumContent: string (e.g., "500 mg")
+        - sugarContent: string (e.g., "10 g")
+        """
+        nutrition = recipe_data.get("nutrition")
+        if not isinstance(nutrition, dict):
+            return None
+        
+        # Map Schema.org fields to Mealie fields (Mealie uses string format)
+        mealie_nutrition = {}
+        
+        # Standard nutrition fields from Schema.org
+        field_mappings = {
+            "calories": "calories",
+            "fatContent": "fatContent",
+            "proteinContent": "proteinContent",
+            "carbohydrateContent": "carbohydrateContent",
+            "fiberContent": "fiberContent",
+            "sodiumContent": "sodiumContent",
+            "sugarContent": "sugarContent",
+        }
+        
+        has_any = False
+        for schema_field, mealie_field in field_mappings.items():
+            value = nutrition.get(schema_field)
+            if value:
+                mealie_nutrition[mealie_field] = str(value)
+                has_any = True
+        
+        return mealie_nutrition if has_any else None
+
     def _build_update_payload(self, original_recipe_schema: dict) -> dict:
         """
         Build payload for PATCH/PUT to /api/recipes/{id|slug} using Mealie internal field names.
@@ -93,6 +143,13 @@ class Mealie:
             "recipeIngredient": ingredients,
             "recipeInstructions": instructions,
         }
+        
+        # Add nutrition if available
+        nutrition = self._build_nutrition(original_recipe_schema)
+        if nutrition:
+            update_payload["nutrition"] = nutrition
+            print(f"[Mealie] Including nutrition: {nutrition}")
+        
         return update_payload
 
     def create_recipe(self, recipe_data: dict) -> dict:
