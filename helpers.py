@@ -1,8 +1,43 @@
 from config import config
+import logging
 import re
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+
+# ==============================================================================
+# Logging Configuration
+# ==============================================================================
+
+def setup_logger(name: str) -> logging.Logger:
+    """Create and configure a logger with time, function name, and severity.
+    
+    Args:
+        name: Name of the logger (typically __name__).
+        
+    Returns:
+        Configured logger instance.
+    """
+    logger = logging.getLogger(name)
+    
+    # Only configure if not already configured
+    if not logger.handlers:
+        logger.setLevel(logging.INFO)
+        
+        # Create console handler
+        handler = logging.StreamHandler()
+        handler.setLevel(logging.INFO)
+        
+        # Create formatter with time, name, function, severity
+        formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(funcName)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+    
+    return logger
 
 
 # ==============================================================================

@@ -6,6 +6,9 @@ Uses OpenAI's API with vision capabilities.
 import base64
 from .base import LLMImageSelector
 from config import config
+from helpers import setup_logger
+
+logger = setup_logger(__name__)
 
 
 class OpenAIImageSelector(LLMImageSelector):
@@ -52,5 +55,5 @@ class OpenAIImageSelector(LLMImageSelector):
             )
             return self._parse_selection_response(response.output_text or "", len(frame_paths))
         except Exception as e:
-            print(f"[OpenAIImageSelector] Selection error: {e}")
+            logger.error(f"Selection error: {e}")
             return None

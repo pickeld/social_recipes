@@ -8,7 +8,7 @@ recipe management systems (e.g., Tandoor, Mealie).
 from abc import ABC, abstractmethod
 import os
 
-from helpers import create_http_session
+from helpers import create_http_session, setup_logger
 
 
 class RecipeExporter(ABC):
@@ -116,4 +116,5 @@ class RecipeExporter(ABC):
         Args:
             message: Message to log.
         """
-        print(f"[{self._name}] {message}")
+        logger = setup_logger(self._name)
+        logger.info(message)

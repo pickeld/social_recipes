@@ -5,6 +5,9 @@ Uses Google's Gemini API with vision capabilities.
 
 from .base import LLMImageSelector
 from config import config
+from helpers import setup_logger
+
+logger = setup_logger(__name__)
 
 
 class GeminiImageSelector(LLMImageSelector):
@@ -46,5 +49,5 @@ class GeminiImageSelector(LLMImageSelector):
             )
             return self._parse_selection_response(response.text or "", len(frame_paths))
         except Exception as e:
-            print(f"[GeminiImageSelector] Selection error: {e}")
+            logger.error(f"Selection error: {e}")
             return None

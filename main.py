@@ -3,10 +3,13 @@ import json
 import os
 from chef import Chef
 from config import config
+from helpers import setup_logger
 from mealie import Mealie
 from video_downloader import VideoDownloader
 from transcriber import Transcriber
 from image_extractor import extract_dish_image
+
+logger = setup_logger(__name__)
 
 
 def main(video_url: str):
@@ -23,7 +26,7 @@ def main(video_url: str):
     # Get audio transcription (cached with language in filename)
     audio_cache = os.path.join(dish_dir, f"transcription_{lang}.txt")
     if os.path.exists(audio_cache):
-        print(f"Using cached transcription ({lang}).")
+        logger.info(f"Using cached transcription ({lang}).")
         with open(audio_cache, "r") as f:
             transcription = f.read()
     else:
@@ -35,18 +38,18 @@ def main(video_url: str):
     visual_text = ""
     visual_cache = os.path.join(dish_dir, f"visual_{lang}.txt")
     if os.path.exists(visual_cache):
-        print(f"Using cached visual text ({lang}).")
+        logger.info(f"Using cached visual text ({lang}).")
         with open(visual_cache, "r") as f:
             visual_text = f.read()
     else:
-        print(f"Extracting on-screen text from video using {config.LLM_PROVIDER} ({lang})...")
+        logger.info(f"Extracting on-screen text from video using {config.LLM_PROVIDER} ({lang})...")
         try:
             visual_text = transcriber.extract_visual_text()
             with open(visual_cache, "w") as f:
                 f.write(visual_text)
-            print(f"Extracted {len(visual_text)} characters of visual text.")
+            logger.info(f"Extracted {len(visual_text)} characters of visual text.")
         except Exception as e:
-            print(f"Warning: Could not extract visual text: {e}")
+            logger.warning(f"Could not extract visual text: {e}")
     
     # Combine audio transcription and visual text
     combined_transcription = transcription
@@ -61,16 +64,16 @@ def main(video_url: str):
     image_path = None
     image_cache = os.path.join(dish_dir, "dish.jpg")
     if os.path.exists(image_cache):
-        print("Using cached dish image.")
+        logger.info("Using cached dish image.")
         image_path = image_cache
     else:
-        print("Extracting best dish image from video...")
+        logger.info("Extracting best dish image from video...")
         try:
             image_path = extract_dish_image(video_path)
             if image_path:
-                print(f"Dish image extracted: {image_path}")
+                logger.info(f"Dish image extracted: {image_path}")
         except Exception as e:
-            print(f"Warning: Could not extract dish image: {e}")
+            logger.warning(f"Could not extract dish image: {e}")
     
     return {
         "title": title,
@@ -97,7 +100,7 @@ if __name__ == "__main__":
 
     recipe_data = chef.create_recipe()
     if not recipe_data:
-        print("No recipe created.")
+        logger.warning("No recipe created.")
     else:
         image_path = video_results.get("image_path")
         
@@ -109,7 +112,7 @@ if __name__ == "__main__":
                 
                 # Upload dish image if available
                 if image_path and tandoor_recipe.get("id"):
-                    print("Uploading dish image to Tandoor...")
+                    logger.info("Uploading dish image to Tandoor...")
                     tandoor.upload_image(tandoor_recipe["id"], image_path)
                     
             elif config.OUTPUT_TARGET == "mealie":
@@ -119,7 +122,7 @@ if __name__ == "__main__":
                 # Upload dish image if available
                 recipe_slug = mealie_recipe.get("slug") or mealie_recipe.get("id")
                 if image_path and recipe_slug:
-                    print("Uploading dish image to Mealie...")
+                    logger.info("Uploading dish image to Mealie...")
                     mealie.upload_image(recipe_slug, image_path)
                 
-    print(json.dumps(recipe_data, ensure_ascii=False, indent=2))
+    logger.info(json.dumps(recipe_data, ensure_ascii=False, indent=2))

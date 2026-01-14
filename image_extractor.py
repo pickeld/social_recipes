@@ -7,6 +7,9 @@ import os
 import subprocess
 import shutil
 from llm_providers import get_image_selector
+from helpers import setup_logger
+
+logger = setup_logger(__name__)
 
 
 class ImageExtractor:
@@ -33,23 +36,25 @@ class ImageExtractor:
         # Focus on the last portion of the video where finished dish is more likely
         frames = self._extract_frames_weighted_end(num_candidates)
         if not frames:
-            print("[ImageExtractor] No frames could be extracted from video")
+            logger.warning("No frames could be extracted from video")
             return None
 
         # Use LLM to select the best frame
         try:
+            logger.debug(f"Selecting best frame from {len(frames)} candidates using LLM")
             selector = get_image_selector()
             best_frame_idx = selector.select_best_frame(frames)
         except Exception as e:
-            print(f"[ImageExtractor] LLM selection failed: {e}")
+            logger.error(f"LLM selection failed: {e}")
             best_frame_idx = None
 
         if best_frame_idx is None:
             # Fallback: use the last frame (most likely to show finished dish)
             best_frame_idx = len(frames) - 1
-            print(f"[ImageExtractor] Using fallback frame index: {best_frame_idx}")
+            logger.info(f"Using fallback frame index: {best_frame_idx}")
 
         best_frame = frames[best_frame_idx]
+        logger.debug(f"Selected frame {best_frame_idx}: {best_frame}")
         
         # Copy to final output location with descriptive name
         output_path = os.path.join(self.dish_dir, "dish.jpg")
@@ -57,7 +62,7 @@ class ImageExtractor:
         # Create high-quality version of the selected frame
         self._enhance_frame(best_frame, output_path)
         
-        print(f"[ImageExtractor] Best dish image saved to: {output_path}")
+        logger.info(f"Best dish image saved to: {output_path}")
         return output_path
 
     def _extract_frames_weighted_end(self, num_frames: int = 12) -> list[str]:
@@ -107,7 +112,7 @@ class ImageExtractor:
                 try:
                     subprocess.run(cmd, capture_output=True, check=True)
                 except subprocess.CalledProcessError as e:
-                    print(f"[ImageExtractor] Failed to extract frame at {ts}s: {e}")
+                    logger.warning(f"Failed to extract frame at {ts}s: {e}")
                     continue
 
             if os.path.exists(frame_path):
@@ -189,7 +194,7 @@ def extract_dish_image_candidates(video_path: str, num_candidates: int = 12) -> 
         selector = get_image_selector()
         best_frame_idx = selector.select_best_frame(frames)
     except Exception as e:
-        print(f"[ImageExtractor] LLM selection failed: {e}")
+        logger.error(f"LLM selection failed: {e}")
         best_frame_idx = len(frames) - 1  # Fallback to last frame
     
     if best_frame_idx is None:
