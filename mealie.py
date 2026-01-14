@@ -4,6 +4,7 @@ Mealie recipe exporter.
 This module provides functionality to export recipes to Mealie.
 """
 
+import os
 from config import config
 
 from recipe_exporter import RecipeExporter
@@ -69,46 +70,74 @@ class Mealie(RecipeExporter):
     def _build_update_payload(self, original_recipe_schema: dict) -> dict:
         """
         Build payload for PATCH/PUT to /api/recipes/{id|slug} using Mealie internal field names.
+        
+        Mealie RecipeIngredient schema:
+        - quantity: float (optional)
+        - unit: object with 'name' field or null (Mealie auto-creates units)
+        - food: object with 'name' field or null (Mealie auto-creates foods)
+        - note: string (optional)
+        - display: string (the full ingredient text for display)
+        - originalText: string (optional, original parsed text)
         """
         ry = original_recipe_schema.get("recipeYield") or ""
         ry_qty = extract_servings(original_recipe_schema)
 
-        # Ingredients
+        # Ingredients - build from structured data
         ing_struct = original_recipe_schema.get(
             "recipeIngredientStructured") or []
         ingredients = []
-        for item in ing_struct:
-            if not isinstance(item, dict):
-                continue
-            raw = (item.get("raw") or item.get("normalized") or "").strip()
-            qty_s = (item.get("quantity") or "").strip()
-            qty_num = coerce_num(qty_s)
-            unit = (item.get("unit") or "").strip() or None
-            food = (item.get("food") or "").strip() or None
-            modifiers = item.get("modifiers") or []
-            if isinstance(modifiers, str):
-                modifiers = [m.strip()
-                             for m in modifiers.split(",") if m.strip()]
-            notes = (item.get("notes") or "").strip()
-            note_parts = []
-            if notes:
-                note_parts.append(notes)
-            if modifiers:
-                note_parts.append(" ".join(modifiers))
-            note = " | ".join(note_parts) or None
-            display = raw or " ".join(
-                filter(None, [qty_s, unit or "", food or ""])).strip()
-            ingredients.append(
-                {
-                    "quantity": qty_num,
-                    "unit": unit,
-                    "food": food,
-                    "note": note,
-                    "display": display,
-                    "title": None,
-                    "originalText": raw or None,
-                }
-            )
+        
+        # If no structured ingredients, fall back to simple ingredient strings
+        if not ing_struct:
+            simple_ingredients = original_recipe_schema.get("recipeIngredient") or []
+            for line in simple_ingredients:
+                if isinstance(line, str) and line.strip():
+                    ingredients.append({
+                        "quantity": None,
+                        "unit": None,
+                        "food": None,
+                        "note": line.strip(),
+                        "display": line.strip(),
+                        "originalText": line.strip(),
+                    })
+        else:
+            for item in ing_struct:
+                if not isinstance(item, dict):
+                    continue
+                raw = (item.get("raw") or item.get("normalized") or "").strip()
+                qty_s = (item.get("quantity") or "").strip()
+                qty_num = coerce_num(qty_s) if qty_s else None
+                unit_name = (item.get("unit") or "").strip()
+                food_name = (item.get("food") or "").strip()
+                modifiers = item.get("modifiers") or []
+                if isinstance(modifiers, str):
+                    modifiers = [m.strip()
+                                 for m in modifiers.split(",") if m.strip()]
+                notes = (item.get("notes") or "").strip()
+                note_parts = []
+                if notes:
+                    note_parts.append(notes)
+                if modifiers:
+                    note_parts.append(" ".join(modifiers))
+                note = " | ".join(note_parts) or None
+                display = raw or " ".join(
+                    filter(None, [qty_s, unit_name, food_name])).strip()
+                
+                # Mealie expects unit and food as objects with 'name' field, not just strings
+                # Mealie will auto-create units/foods when given objects with 'name'
+                unit_obj = {"name": unit_name} if unit_name else None
+                food_obj = {"name": food_name} if food_name else None
+                
+                ingredients.append(
+                    {
+                        "quantity": qty_num,
+                        "unit": unit_obj,
+                        "food": food_obj,
+                        "note": note,
+                        "display": display,
+                        "originalText": raw or None,
+                    }
+                )
 
         # Instructions
         instructions_src = original_recipe_schema.get(
@@ -231,30 +260,82 @@ class Mealie(RecipeExporter):
             self._log(f"Server already populated ingredients ({len(ingr_list)}). Skipping update.")
             return current
 
-        # Build update payload
-        update_payload = self._build_update_payload(recipe_data)
-        self._log(f"PATCH update ingredients={len(update_payload['recipeIngredient'])} instructions={len(update_payload['recipeInstructions'])}")
-
-        # Try PATCH first
-        patch_url = f"{self.base_url}/api/recipes/{ident}"
-        patch_resp = self._session.patch(patch_url, json=update_payload, headers=headers)
-        self._log(f"PATCH {patch_url} -> {patch_resp.status_code}")
+        # Build update payload - merge with existing recipe to ensure all required fields present
+        update_fields = self._build_update_payload(recipe_data)
+        self._log(f"Update ingredients={len(update_fields['recipeIngredient'])} instructions={len(update_fields['recipeInstructions'])}")
         
-        if patch_resp.status_code == 405:  # Method not allowed; try PUT
-            put_resp = self._session.put(patch_url, json=update_payload, headers=headers)
-            self._log(f"PUT {patch_url} -> {put_resp.status_code}")
-            if put_resp.status_code >= 400:
-                self._log(f"Update error body: {put_resp.text[:1000]}")
-                put_resp.raise_for_status()
-            try:
-                return put_resp.json()
-            except Exception:
-                return {"id": ident, "update_raw": put_resp.text}
-        elif patch_resp.status_code >= 400:
-            self._log(f"Update error body: {patch_resp.text[:1000]}")
-            patch_resp.raise_for_status()
+        # Merge update fields into the existing recipe (Mealie PUT requires complete object)
+        update_payload = current.copy()
+        update_payload.update(update_fields)
+
+        # Use PUT (Mealie's PATCH can be temperamental)
+        put_url = f"{self.base_url}/api/recipes/{ident}"
+        self._log(f"PUT {put_url}")
+        put_resp = self._session.put(put_url, json=update_payload, headers=headers)
+        self._log(f"PUT -> {put_resp.status_code}")
+        
+        if put_resp.status_code >= 400:
+            self._log(f"Update error body: {put_resp.text[:1000]}")
+            put_resp.raise_for_status()
+        
+        try:
+            return put_resp.json()
+        except Exception:
+            return {"id": ident, "update_raw": put_resp.text}
+
+    def upload_image(self, recipe_id: str | int, image_path: str) -> bool:
+        """
+        Upload an image for a recipe to Mealie.
+        
+        Mealie's image API endpoint: PUT /api/recipes/{slug}/image
+        Accepts multipart form data with the image file.
+        
+        Args:
+            recipe_id: The slug or ID of the recipe.
+            image_path: Path to the image file (JPEG/PNG).
+            
+        Returns:
+            True if upload succeeded, False otherwise.
+        """
+        if not os.path.exists(image_path):
+            self._log(f"Image file not found: {image_path}")
+            logger.warning(f"[Upload] Image file not found: {image_path}")
+            return False
+
+        # Mealie uses PUT for image upload with multipart form data
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Accept": "application/json",
+        }
+
+        url = self._get_image_upload_url(recipe_id)
+
+        # Determine content type from file extension
+        ext = os.path.splitext(image_path)[1].lower()
+        content_type = "image/jpeg" if ext in (".jpg", ".jpeg") else "image/png"
+
+        self._log(f"Uploading image to recipe {recipe_id}")
+        logger.info(f"[Upload] Uploading image to Mealie recipe {recipe_id}")
 
         try:
-            return patch_resp.json()
-        except Exception:
-            return {"id": ident, "update_raw": patch_resp.text}
+            with open(image_path, "rb") as f:
+                # Mealie expects the file field to be named 'image'
+                files = {"image": (os.path.basename(image_path), f, content_type)}
+                # Also add extension parameter
+                data = {"extension": ext.lstrip(".")}
+                resp = self._session.put(url, files=files, data=data, headers=headers, timeout=60)
+
+            self._log(f"Image upload status: {resp.status_code}")
+
+            if resp.status_code in (200, 201, 204):
+                self._log("Image uploaded successfully")
+                logger.info("[Upload] Image uploaded successfully to Mealie")
+                return True
+            else:
+                self._log(f"Image upload failed: {resp.text[:500]}")
+                logger.warning(f"[Upload] Image upload failed: HTTP {resp.status_code}")
+                return False
+        except Exception as e:
+            self._log(f"Image upload error: {e}")
+            logger.error(f"[Upload] Image upload error: {e}")
+            return False

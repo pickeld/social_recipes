@@ -306,7 +306,7 @@ def process_video_task(url):
             """Forward transcription progress to WebSocket."""
             emit_progress(stage, message, percent)
         
-        transcriber = Transcriber(video_path, progress_callback=transcribe_progress)
+        transcriber = Transcriber(video_path)
         lang = config.TARGET_LANGUAGE
 
         audio_cache = os.path.join(dish_dir, f"transcription_{lang}.txt")

@@ -1,18 +1,13 @@
 import os
 import subprocess
 import sys
-import threading
 import time
-from typing import Callable
 from faster_whisper import WhisperModel
 
 from config import config
 from helpers import setup_logger
 
 logger = setup_logger(__name__)
-
-# Type alias for progress callback: (stage: str, message: str, percent: float) -> None
-ProgressCallback = Callable[[str, str, float], None]
 
 
 class Transcriber:
@@ -22,7 +17,6 @@ class Transcriber:
         model_size: str | None = None,  # tiny | base | small | medium | large-v3 (defaults to config.WHISPER_MODEL)
         device: str = "auto",           # "cpu" or "cuda"
         compute_type: str = "auto",     # "float16"/"int8"/"auto"
-        progress_callback: ProgressCallback | None = None  # Optional callback for progress updates
     ):
         self.video_path = video_path
         self.model_size = model_size or config.WHISPER_MODEL
@@ -30,7 +24,6 @@ class Transcriber:
         self.compute_type = compute_type
         self.model = None
         self.audio_path = self._get_audio_path()
-        self.progress_callback = progress_callback
 
     def _get_audio_path(self):
         # Store audio in the same dish folder as the video
@@ -128,12 +121,6 @@ class Transcriber:
             self.model = WhisperModel(
                 self.model_size, device=self.device, compute_type=self.compute_type)
 
-    def _emit_progress(self, stage: str, message: str, percent: float):
-        """Emit progress update via callback if available."""
-        if self.progress_callback:
-            self.progress_callback(stage, message, percent)
-        logger.info(f"[{stage}] {message} ({percent:.0f}%)")
-
     def _get_audio_duration(self) -> float:
         """Get audio file duration in seconds using ffprobe."""
         if not os.path.exists(self.audio_path):
@@ -162,51 +149,18 @@ class Transcriber:
                      Defaults to config.TARGET_LANGUAGE if not specified.
         """
         self._extract_audio()
-        
-        # Emit progress for model loading
-        self._emit_progress('transcribe', f'Loading Whisper model ({self.model_size})...', 36)
         self._load_model()
-        self._emit_progress('transcribe', 'Model loaded, starting transcription...', 38)
 
         # Use target language from config if not specified
         lang = language or config.TARGET_LANGUAGE
 
-        # Get audio duration for progress tracking
-        audio_duration = self._get_audio_duration()
-        if audio_duration <= 0:
-            audio_duration = 60.0  # Fallback estimate
-        
-        # Transcribe with progress tracking
-        # Progress range: 38% to 50% (12% range for transcription)
-        progress_start = 38
-        progress_range = 12
-        
         segments, info = self.model.transcribe(
             self.audio_path, language=lang)
         
         text_parts = []
-        last_progress_update = 0
-        segment_count = 0
-        
         for seg in segments:
             text_parts.append(seg.text.strip())
-            segment_count += 1
-            
-            # Calculate progress based on segment end time
-            if audio_duration > 0:
-                progress_pct = min(1.0, seg.end / audio_duration)
-                current_progress = progress_start + (progress_pct * progress_range)
-                
-                # Only emit every ~2% to avoid spamming
-                if current_progress - last_progress_update >= 2:
-                    self._emit_progress(
-                        'transcribe',
-                        f'Transcribing... {seg.end:.1f}s / {audio_duration:.1f}s',
-                        current_progress
-                    )
-                    last_progress_update = current_progress
         
-        self._emit_progress('transcribe', f'Transcription complete ({segment_count} segments)', 50)
         return " ".join(text_parts).strip()
 
     def extract_visual_text(self) -> str:
@@ -231,28 +185,19 @@ class Transcriber:
         from google.genai import types
         import time
 
-        self._emit_progress('visual', 'Connecting to Gemini API...', 56)
         client = genai.Client(api_key=config.GEMINI_API_KEY)
 
         # Upload the video file to Gemini
-        self._emit_progress('visual', 'Uploading video to Gemini...', 57)
         video_file = client.files.upload(file=self.video_path)
 
         # Wait for the video to be processed
-        self._emit_progress('visual', 'Waiting for Gemini to process video...', 58)
-        poll_count = 0
         while video_file.state and video_file.state.name == "PROCESSING":
             time.sleep(2)
-            poll_count += 1
-            # Progress from 58% to 62% during processing
-            progress = min(62, 58 + poll_count * 0.5)
-            self._emit_progress('visual', f'Processing video... ({poll_count * 2}s)', progress)
             video_file = client.files.get(name=video_file.name or "")
 
         if video_file.state and video_file.state.name == "FAILED":
             raise RuntimeError(f"Video processing failed: {video_file.state}")
 
-        self._emit_progress('visual', 'Analyzing video for on-screen text...', 63)
         prompt = self._get_visual_text_prompt()
 
         response = client.models.generate_content(
@@ -271,7 +216,6 @@ class Transcriber:
             ],
         )
 
-        self._emit_progress('visual', 'Visual text extraction complete', 65)
         return response.text or ""
 
     def _extract_visual_text_openai(self) -> str:
@@ -279,7 +223,6 @@ class Transcriber:
         import base64
         from openai import OpenAI
 
-        self._emit_progress('visual', 'Extracting frames from video...', 56)
         client = OpenAI(api_key=config.OPENAI_API_KEY)
 
         # Extract frames from video
@@ -287,10 +230,9 @@ class Transcriber:
         if not frames:
             raise RuntimeError("No frames could be extracted from video")
 
-        self._emit_progress('visual', f'Encoding {len(frames)} frames...', 58)
         # Encode frames as base64
         image_contents = []
-        for i, frame_path in enumerate(frames):
+        for frame_path in frames:
             with open(frame_path, "rb") as f:
                 b64_image = base64.standard_b64encode(f.read()).decode("utf-8")
             image_contents.append({
@@ -300,11 +242,7 @@ class Transcriber:
                     "detail": "high"
                 }
             })
-            # Progress from 58% to 60% during encoding
-            progress = 58 + ((i + 1) / len(frames)) * 2
-            self._emit_progress('visual', f'Encoding frame {i + 1}/{len(frames)}...', progress)
 
-        self._emit_progress('visual', 'Sending frames to OpenAI for analysis...', 61)
         prompt = self._get_visual_text_prompt()
 
         response = client.responses.create(
@@ -320,7 +258,6 @@ class Transcriber:
             ]
         )
 
-        self._emit_progress('visual', 'Visual text extraction complete', 65)
         return response.output_text or ""
 
     def _extract_frames(self, num_frames: int = 8) -> list[str]:
