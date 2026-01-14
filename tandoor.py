@@ -9,7 +9,9 @@ from config import config
 import re
 
 from recipe_exporter import RecipeExporter
-from helpers import coerce_num, parse_iso_duration, extract_servings, parse_nutrition_value
+from helpers import coerce_num, parse_iso_duration, extract_servings, parse_nutrition_value, setup_logger
+
+logger = setup_logger(__name__)
 
 
 class Tandoor(RecipeExporter):
@@ -466,25 +468,33 @@ class Tandoor(RecipeExporter):
         Tandoor automatically creates units and foods when given just names,
         so no pre-creation API calls are needed.
         """
+        logger.info("[Upload] Starting Tandoor recipe upload...")
         headers = self._build_headers()
         payload = self._to_tandoor_payload(recipe_data)
         create_url = f"{self.base_url}/api/recipe/"
 
-        self._log(f"Creating recipe: {payload.get('name')}")
+        recipe_name = payload.get('name', 'Unknown')
+        logger.info(f"[Upload] Creating recipe in Tandoor: {recipe_name}")
+        self._log(f"Creating recipe: {recipe_name}")
         self._log(f"POST {create_url}")
 
         resp = self._session.post(create_url, json=payload, headers=headers, timeout=120)
         self._log(f"Response status: {resp.status_code}")
 
         if resp.status_code >= 400:
+            logger.error(f"[Upload] Failed to create recipe in Tandoor: HTTP {resp.status_code}")
             self._log(f"Error response: {resp.text[:1000]}")
             resp.raise_for_status()
+
+        logger.info(f"[Upload] Recipe created successfully (HTTP {resp.status_code})")
 
         try:
             result = resp.json()
             recipe_id = result.get('id')
+            logger.info(f"[Upload] Recipe ID: {recipe_id}")
             self._log(f"Recipe created with ID: {recipe_id}")
             return result
         except Exception as e:
+            logger.warning(f"[Upload] Could not parse response JSON: {e}")
             self._log(f"JSON parse error: {e}")
             return {"raw": resp.text}
