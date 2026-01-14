@@ -293,19 +293,3 @@ MIT License - see LICENSE file for details.
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
-
----
-
-## GitHub Repository
-
-### Description
-
-AI-powered recipe extraction from TikTok, YouTube & Instagram videos with automatic import to Tandoor/Mealie recipe managers.
-
-### Topics
-
-```
-recipe-extraction tiktok youtube instagram whisper openai gemini tandoor mealie self-hosted docker flask python ai llm video-processing transcription cooking food automation pwa mobile-app share-target
-```
-
-**To configure:** Go to your repository on GitHub → Click the ⚙️ gear icon next to "About" → Add the description and topics above.

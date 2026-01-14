@@ -3,6 +3,9 @@ import subprocess
 from faster_whisper import WhisperModel
 
 from config import config
+from helpers import setup_logger
+
+logger = setup_logger(__name__)
 
 
 class Transcriber:
@@ -46,6 +49,9 @@ class Transcriber:
             # Set HF_TOKEN for authenticated HuggingFace Hub requests
             if config.HF_TOKEN:
                 os.environ["HF_TOKEN"] = config.HF_TOKEN
+                logger.info("HF_TOKEN set in environment for HuggingFace Hub requests.")
+            else:
+                logger.warning("HF_TOKEN not configured. Some models may not be accessible.")
             self.model = WhisperModel(
                 self.model_size, device=self.device, compute_type=self.compute_type)
 
