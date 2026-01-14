@@ -1,5 +1,8 @@
 import os
 import subprocess
+import sys
+import threading
+import time
 from faster_whisper import WhisperModel
 
 from config import config
@@ -28,20 +31,84 @@ class Transcriber:
         dish_dir = os.path.dirname(self.video_path)
         return os.path.join(dish_dir, "audio.wav")
 
+    def _get_video_duration(self) -> float:
+        """Get video duration in seconds using ffprobe."""
+        duration_cmd = [
+            "ffprobe", "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            self.video_path
+        ]
+        try:
+            result = subprocess.run(duration_cmd, capture_output=True, text=True, check=True)
+            return float(result.stdout.strip())
+        except (subprocess.CalledProcessError, ValueError):
+            return 0.0
+
     def _extract_audio(self, overwrite: bool = False):
-        """Extract mono WAV audio at 16kHz using ffmpeg."""
+        """Extract mono WAV audio at 16kHz using ffmpeg with progress indicator."""
         if os.path.exists(self.audio_path) and not overwrite:
+            logger.info("[Transcribe] Using cached audio file.")
             return self.audio_path
+
+        # Get video duration for progress estimation
+        duration = self._get_video_duration()
+        logger.info(f"[Transcribe] Extracting audio from video ({duration:.1f}s)...")
 
         cmd = [
             "ffmpeg",
             "-y", "-i", self.video_path,
             "-vn", "-acodec", "pcm_s16le",
             "-ar", "16000", "-ac", "1",
+            "-progress", "pipe:1",  # Output progress to stdout
             self.audio_path
         ]
-        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL)
+        
+        # Run ffmpeg with progress tracking
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True
+        )
+        
+        # Track progress
+        start_time = time.time()
+        current_time = 0.0
+        
+        if process.stdout:
+            for line in process.stdout:
+                line = line.strip()
+                if line.startswith("out_time_ms="):
+                    try:
+                        out_time_ms = int(line.split("=")[1])
+                        current_time = out_time_ms / 1_000_000  # Convert to seconds
+                        if duration > 0:
+                            progress = min(100, (current_time / duration) * 100)
+                            elapsed = time.time() - start_time
+                            # Print progress bar
+                            bar_width = 30
+                            filled = int(bar_width * progress / 100)
+                            bar = "█" * filled + "░" * (bar_width - filled)
+                            sys.stdout.write(f"\r[Transcribe] Extracting audio: [{bar}] {progress:.0f}% ({elapsed:.1f}s)")
+                            sys.stdout.flush()
+                    except (ValueError, IndexError):
+                        pass
+                elif line == "progress=end":
+                    break
+        
+        process.wait()
+        
+        # Clear progress line and print completion
+        if duration > 0:
+            elapsed = time.time() - start_time
+            sys.stdout.write(f"\r[Transcribe] Audio extraction complete ({elapsed:.1f}s)                    \n")
+            sys.stdout.flush()
+        
+        if process.returncode != 0:
+            raise subprocess.CalledProcessError(process.returncode, cmd)
+        
+        logger.info(f"[Transcribe] Audio saved to: {self.audio_path}")
         return self.audio_path
 
     def _load_model(self):
