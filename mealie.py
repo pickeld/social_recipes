@@ -7,7 +7,9 @@ This module provides functionality to export recipes to Mealie.
 from config import config
 
 from recipe_exporter import RecipeExporter
-from helpers import coerce_num, extract_servings, parse_nutrition_value
+from helpers import coerce_num, extract_servings, parse_nutrition_value, setup_logger
+
+logger = setup_logger(__name__)
 
 
 class Mealie(RecipeExporter):
@@ -150,13 +152,16 @@ class Mealie(RecipeExporter):
         1. Create base recipe via POST /api/recipes (minimal payload).
         2. If server returns primitive (slug/id) or placeholder ingredient list, PATCH with full structured data.
         """
+        logger.info("[Upload] Starting Mealie recipe upload...")
         headers = self._build_headers()
         
+        recipe_name = recipe_data.get("name") or recipe_data.get("title") or "Untitled"
         base_payload = {
-            "name": recipe_data.get("name") or recipe_data.get("title") or "Untitled",
+            "name": recipe_name,
             "description": recipe_data.get("description") or "",
         }
         create_url = f"{self.base_url}/api/recipes"
+        logger.info(f"[Upload] Creating recipe in Mealie: {recipe_name}")
         self._log(f"Base create POST {create_url} payload={base_payload}")
         
         resp = self._session.post(create_url, json=base_payload, headers=headers)
@@ -164,8 +169,11 @@ class Mealie(RecipeExporter):
         self._log(f"Base create status {resp.status_code}")
         
         if resp.status_code >= 400:
+            logger.error(f"[Upload] Failed to create recipe in Mealie: HTTP {resp.status_code}")
             self._log(f"Create error body: {raw_text[:1000]}")
             resp.raise_for_status()
+
+        logger.info(f"[Upload] Recipe created successfully (HTTP {resp.status_code})")
 
         # Parse primitive or object
         created = None
@@ -181,8 +189,11 @@ class Mealie(RecipeExporter):
         elif isinstance(created, (str, int)):
             ident = str(created).strip().strip('"')
         if not ident:
+            logger.warning("[Upload] Could not determine recipe identifier")
             self._log("Could not determine created recipe identifier; returning raw.")
             return {"raw": created}
+        
+        logger.info(f"[Upload] Recipe identifier: {ident}")
 
         # Fetch current state
         detail_url_candidates = [
