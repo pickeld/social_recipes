@@ -155,6 +155,7 @@ class Chef:
         return data
 
     def create_recipe(self, *, source_url: str | None = None, max_retries: int = 3) -> dict:
+        logger.info("[AI Recipe] Starting recipe creation from transcription...")
         payload = {
             "source_url": source_url,
             "description": self.description,
@@ -164,18 +165,23 @@ class Chef:
         last_error = None
         for attempt in range(max_retries):
             try:
+                logger.info(f"[AI Recipe] Calling LLM to generate recipe (attempt {attempt + 1}/{max_retries})...")
                 response_text = self._call_llm(
                     get_recipe_system_prompt(),
                     json.dumps(payload, ensure_ascii=False)
                 )
+                logger.info(f"[AI Recipe] LLM response received ({len(response_text)} chars)")
                 data = json.loads(response_text)
+                logger.info(f"[AI Recipe] Recipe parsed. Name: {data.get('name', 'Unknown')}")
                 recipe = self._postprocess_recipe(data, source_url)
+                logger.info(f"[AI Recipe] Recipe postprocessed. Ingredients: {len(recipe.get('recipeIngredient', []))}, Steps: {len(recipe.get('recipeInstructions', []))}")
                 recipe = self._enrich_yield_and_nutrition(recipe)
+                logger.info("[AI Recipe] Recipe creation complete.")
                 return recipe
             except json.JSONDecodeError as e:
                 last_error = e
-                logger.warning(f"JSON parsing failed (attempt {attempt + 1}/{max_retries}): {e}")
-                logger.debug(f"Raw response: {response_text[:500]}...")
+                logger.warning(f"[AI Recipe] JSON parsing failed (attempt {attempt + 1}/{max_retries}): {e}")
+                logger.debug(f"[AI Recipe] Raw response: {response_text[:500]}...")
                 if attempt < max_retries - 1:
                     continue
         
