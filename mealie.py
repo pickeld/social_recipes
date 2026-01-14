@@ -119,7 +119,12 @@ class Mealie(RecipeExporter):
             elif isinstance(step, str):
                 text = step.strip()
             if text:
-                instructions.append({"title": "", "summary": "", "text": text})
+                instructions.append({
+                    "title": "",
+                    "summary": "",
+                    "text": text,
+                    "ingredientReferences": []
+                })
 
         update_payload = {
             "name": original_recipe_schema.get("name") or original_recipe_schema.get("title") or "Untitled",
