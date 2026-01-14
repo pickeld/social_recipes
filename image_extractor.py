@@ -33,36 +33,42 @@ class ImageExtractor:
         Returns:
             Path to the best image file, or None if extraction fails.
         """
+        logger.info(f"[Extract Image] Starting image extraction from video: {self.video_path}")
+        
         # Focus on the last portion of the video where finished dish is more likely
+        logger.info(f"[Extract Image] Extracting {num_candidates} candidate frames...")
         frames = self._extract_frames_weighted_end(num_candidates)
         if not frames:
-            logger.warning("No frames could be extracted from video")
+            logger.warning("[Extract Image] No frames could be extracted from video")
             return None
+        logger.info(f"[Extract Image] Extracted {len(frames)} candidate frames")
 
         # Use LLM to select the best frame
         try:
-            logger.debug(f"Selecting best frame from {len(frames)} candidates using LLM")
+            logger.info(f"[Extract Image] Using LLM to select best frame from {len(frames)} candidates...")
             selector = get_image_selector()
             best_frame_idx = selector.select_best_frame(frames)
+            logger.info(f"[Extract Image] LLM selected frame index: {best_frame_idx}")
         except Exception as e:
-            logger.error(f"LLM selection failed: {e}")
+            logger.error(f"[Extract Image] LLM selection failed: {e}")
             best_frame_idx = None
 
         if best_frame_idx is None:
             # Fallback: use the last frame (most likely to show finished dish)
             best_frame_idx = len(frames) - 1
-            logger.info(f"Using fallback frame index: {best_frame_idx}")
+            logger.info(f"[Extract Image] Using fallback frame index: {best_frame_idx}")
 
         best_frame = frames[best_frame_idx]
-        logger.debug(f"Selected frame {best_frame_idx}: {best_frame}")
+        logger.debug(f"[Extract Image] Selected frame {best_frame_idx}: {best_frame}")
         
         # Copy to final output location with descriptive name
         output_path = os.path.join(self.dish_dir, "dish.jpg")
         
         # Create high-quality version of the selected frame
+        logger.info("[Extract Image] Enhancing selected frame...")
         self._enhance_frame(best_frame, output_path)
         
-        logger.info(f"Best dish image saved to: {output_path}")
+        logger.info(f"[Extract Image] Best dish image saved to: {output_path}")
         return output_path
 
     def _extract_frames_weighted_end(self, num_frames: int = 12) -> list[str]:

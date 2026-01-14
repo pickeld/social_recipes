@@ -1,12 +1,11 @@
 import json
-import logging
 import re
 from datetime import datetime, timezone
 
 from config import config
-from helpers import get_recipe_system_prompt, get_yield_nutrition_prompt
+from helpers import get_recipe_system_prompt, get_yield_nutrition_prompt, setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 def _extract_json(text: str) -> str:
@@ -29,23 +28,27 @@ def _extract_json(text: str) -> str:
 
 class Chef:
     def __init__(self, source_url: str, description: str, transcription: str, *, model: str | None = None):
+        logger.info("[AI Recipe] Initializing Chef...")
         self.provider = config.LLM_PROVIDER
         
         if self.provider == "openai":
             from openai import OpenAI
-            logger.info("Using OpenAI LLM provider")
+            logger.info("[AI Recipe] Using OpenAI LLM provider")
             self.client = OpenAI(api_key=config.OPENAI_API_KEY)
             self.model = model or config.OPENAI_MODEL
+            logger.info(f"[AI Recipe] OpenAI model: {self.model}")
         elif self.provider == "gemini":
             from google import genai
-            logger.info("Using Gemini LLM provider")
+            logger.info("[AI Recipe] Using Gemini LLM provider")
             self.client = genai.Client(api_key=config.GEMINI_API_KEY)
             self.model = model or config.GEMINI_MODEL
+            logger.info(f"[AI Recipe] Gemini model: {self.model}")
         else:
             raise ValueError(f"Unknown LLM provider: {self.provider}")
         self.source_url = source_url
         self.description = description
         self.transcription = transcription
+        logger.info(f"[AI Recipe] Chef initialized. Transcription length: {len(transcription)} chars")
 
     def _call_llm(self, system_prompt: str, user_content: str) -> str:
         """Call the LLM and return the response text, abstracting provider differences."""
