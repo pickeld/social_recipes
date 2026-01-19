@@ -1,6 +1,7 @@
 """
 Social Recipes Web UI
 A Flask-based web interface for video recipe extraction with authentication and configuration management.
+Supports parallel job processing with progress persistence.
 """
 
 import os
@@ -8,17 +9,21 @@ import sys
 import base64
 import secrets
 import threading
+import json
 from datetime import timedelta
 from functools import wraps
 
 from dotenv import load_dotenv
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, make_response
-from flask_socketio import SocketIO, emit
+from flask_socketio import SocketIO, emit, join_room, leave_room
 
 from database import (
     init_db, load_config, save_config,
-    verify_user, update_password, hash_password
+    verify_user, update_password, hash_password,
+    get_history, get_history_entry, get_history_count, delete_history_entry,
+    get_job, get_active_jobs
 )
+from job_manager import init_job_manager, get_job_manager
 
 app = Flask(__name__)
 
@@ -77,8 +82,11 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 # Initialize database
 init_db()
 
+# Initialize job manager
+job_manager = init_job_manager(socketio)
+
 # Store pending recipe uploads waiting for confirmation
-# Key: upload_id, Value: {'recipe': recipe_data, 'image_path': path, 'event': threading.Event(), 'confirmed': bool}
+# Key: upload_id, Value: {'recipe': recipe_data, 'image_path': path, 'event': threading.Event(), 'confirmed': bool, 'job_id': str}
 pending_uploads = {}
 
 
@@ -88,6 +96,16 @@ def login_required(f):
     def decorated_function(*args, **kwargs):
         if 'user' not in session:
             return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+def api_login_required(f):
+    """Decorator to require login for API routes (returns JSON error)."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user' not in session:
+            return jsonify({'error': 'Authentication required'}), 401
         return f(*args, **kwargs)
     return decorated_function
 
@@ -118,6 +136,13 @@ def index():
             shared_url = url_match.group(1)
     
     return render_template('index.html', shared_url=shared_url)
+
+
+@app.route('/history')
+@login_required
+def history():
+    """History page showing all past recipe extractions."""
+    return render_template('history.html')
 
 
 @app.route('/share', methods=['GET', 'POST'])
@@ -253,23 +278,187 @@ def change_password():
     return redirect(url_for('settings'))
 
 
-@app.route('/api/process', methods=['POST'])
-@login_required
-def process_video():
-    """Start video processing."""
+# ===== Job API Endpoints =====
+
+@app.route('/api/jobs', methods=['POST'])
+@api_login_required
+def create_job():
+    """Create a new analysis job."""
     data = request.get_json()
     url = data.get('url', '')
 
     if not url:
         return jsonify({'error': 'URL is required'}), 400
 
-    # Start processing in background
-    socketio.start_background_task(process_video_task, url)
-    return jsonify({'status': 'started', 'message': 'Processing started'})
+    # Create job and start processing
+    jm = get_job_manager()
+    job_id = jm.create_new_job(url)
+    
+    # Start the job processing
+    jm.start_job(job_id, process_video_job)
+    
+    # Get job info
+    job = get_job(job_id)
+    
+    return jsonify({
+        'job_id': job_id,
+        'status': 'pending',
+        'url': url,
+        'message': 'Job created and processing started'
+    })
 
 
-def process_video_task(url):
-    """Background task to process video with progress updates."""
+@app.route('/api/jobs', methods=['GET'])
+@api_login_required
+def list_jobs():
+    """List all active jobs."""
+    jobs = get_active_jobs()
+    return jsonify({'jobs': jobs})
+
+
+@app.route('/api/jobs/<job_id>', methods=['GET'])
+@api_login_required
+def get_job_status(job_id):
+    """Get status of a specific job."""
+    job = get_job(job_id)
+    if not job:
+        return jsonify({'error': 'Job not found'}), 404
+    return jsonify(job)
+
+
+@app.route('/api/jobs/<job_id>', methods=['DELETE'])
+@api_login_required
+def cancel_job_api(job_id):
+    """Cancel a running job."""
+    jm = get_job_manager()
+    result = jm.cancel_job(job_id)
+    if result:
+        return jsonify({'status': 'cancelled', 'job_id': job_id})
+    return jsonify({'error': 'Job not found or already completed'}), 404
+
+
+# ===== History API Endpoints =====
+
+@app.route('/api/history', methods=['GET'])
+@api_login_required
+def get_history_api():
+    """Get recipe history with pagination and filtering."""
+    limit = request.args.get('limit', 50, type=int)
+    offset = request.args.get('offset', 0, type=int)
+    status = request.args.get('status')
+    search = request.args.get('search')
+    
+    items = get_history(limit=limit, offset=offset, status_filter=status, search=search)
+    total = get_history_count(status_filter=status, search=search)
+    
+    return jsonify({
+        'items': items,
+        'total': total,
+        'limit': limit,
+        'offset': offset
+    })
+
+
+@app.route('/api/history/<int:history_id>', methods=['GET'])
+@api_login_required
+def get_history_item(history_id):
+    """Get a single history entry."""
+    item = get_history_entry(history_id)
+    if not item:
+        return jsonify({'error': 'History entry not found'}), 404
+    return jsonify(item)
+
+
+@app.route('/api/history/<int:history_id>', methods=['DELETE'])
+@api_login_required
+def delete_history_item(history_id):
+    """Delete a history entry."""
+    result = delete_history_entry(history_id)
+    if result:
+        return jsonify({'status': 'deleted', 'id': history_id})
+    return jsonify({'error': 'History entry not found'}), 404
+
+
+@app.route('/api/history/<int:history_id>/reupload', methods=['POST'])
+@api_login_required
+def reupload_recipe(history_id):
+    """Re-upload a recipe from history to the target."""
+    from config import config
+    
+    item = get_history_entry(history_id)
+    if not item:
+        return jsonify({'error': 'History entry not found'}), 404
+    
+    if not item.get('recipe_data'):
+        return jsonify({'error': 'No recipe data available for this entry'}), 400
+    
+    recipe_data = item['recipe_data']
+    image_path = item.get('thumbnail_path')
+    
+    # Get target from request or use default
+    data = request.get_json() or {}
+    target = data.get('target', config.OUTPUT_TARGET)
+    
+    try:
+        config.reload()
+        
+        if target == 'tandoor':
+            from tandoor import Tandoor
+            tandoor = Tandoor()
+            result = tandoor.create_recipe(recipe_data)
+            if image_path and os.path.exists(image_path) and result.get("id"):
+                tandoor.upload_image(result["id"], image_path)
+        elif target == 'mealie':
+            from mealie import Mealie
+            mealie = Mealie()
+            result = mealie.create_recipe(recipe_data)
+            recipe_slug = result.get("slug") or result.get("id")
+            if image_path and os.path.exists(image_path) and recipe_slug:
+                mealie.upload_image(recipe_slug, image_path)
+        else:
+            return jsonify({'error': f'Unknown target: {target}'}), 400
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'Recipe re-uploaded to {target}',
+            'target': target
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ===== Legacy API (kept for backward compatibility) =====
+
+@app.route('/api/process', methods=['POST'])
+@api_login_required
+def process_video():
+    """Start video processing (legacy endpoint - redirects to job system)."""
+    data = request.get_json()
+    url = data.get('url', '')
+
+    if not url:
+        return jsonify({'error': 'URL is required'}), 400
+
+    # Create job using new system
+    jm = get_job_manager()
+    job_id = jm.create_new_job(url)
+    jm.start_job(job_id, process_video_job)
+    
+    return jsonify({
+        'status': 'started',
+        'message': 'Processing started',
+        'job_id': job_id
+    })
+
+
+def process_video_job(job_id, jm):
+    """Background task to process video with job-based progress updates."""
+    job = get_job(job_id)
+    if not job:
+        return
+    
+    url = job['url']
+    
     try:
         # Import modules - they will read config from SQLite via config.py
         from config import config
@@ -281,51 +470,59 @@ def process_video_task(url):
         # Reload config to get latest values from database
         config.reload()
 
+        # Check for cancellation
+        if jm.is_cancelled(job_id):
+            return
+
         # Step 1: Get video info
-        emit_progress('info', 'Fetching video information...', 10)
+        jm.update_progress(job_id, 'info', 'Fetching video information...', 10)
         downloader = VideoDownloader(url)
         item = downloader._get_info()
         description = item.get("description", "No description available.")
         title = item.get("title", "Untitled")
-        emit_progress('info', f'Video: {title}', 15)
+        jm.update_progress(job_id, 'info', f'Video: {title}', 15, video_title=title)
+
+        if jm.is_cancelled(job_id):
+            return
 
         # Step 2: Download video
-        emit_progress('download', 'Downloading video...', 20)
+        jm.update_progress(job_id, 'download', 'Downloading video...', 20)
         vid_id, video_path = downloader._download_video()
         if vid_id is None:
-            emit_progress('error', 'Failed to download video', 100)
+            jm.fail_job(job_id, 'Failed to download video')
             return
         dish_dir = os.path.join("/tmp", vid_id)
-        emit_progress('download', 'Video downloaded successfully', 30)
+        jm.update_progress(job_id, 'download', 'Video downloaded successfully', 30)
+
+        if jm.is_cancelled(job_id):
+            return
 
         # Step 3: Transcribe audio
-        emit_progress('transcribe', 'Transcribing audio...', 35)
-        
-        # Create transcriber with progress callback for real-time updates
-        def transcribe_progress(stage, message, percent):
-            """Forward transcription progress to WebSocket."""
-            emit_progress(stage, message, percent)
+        jm.update_progress(job_id, 'transcribe', 'Transcribing audio...', 35)
         
         transcriber = Transcriber(video_path)
         lang = config.TARGET_LANGUAGE
 
         audio_cache = os.path.join(dish_dir, f"transcription_{lang}.txt")
         if os.path.exists(audio_cache):
-            emit_progress('transcribe', 'Using cached transcription', 40)
+            jm.update_progress(job_id, 'transcribe', 'Using cached transcription', 40)
             with open(audio_cache, "r") as f:
                 transcription = f.read()
         else:
             transcription = transcriber.transcribe()
             with open(audio_cache, "w") as f:
                 f.write(transcription)
-        emit_progress('transcribe', 'Audio transcribed', 50)
+        jm.update_progress(job_id, 'transcribe', 'Audio transcribed', 50)
+
+        if jm.is_cancelled(job_id):
+            return
 
         # Step 4: Extract visual text
-        emit_progress('visual', 'Extracting on-screen text...', 55)
+        jm.update_progress(job_id, 'visual', 'Extracting on-screen text...', 55)
         visual_text = ""
         visual_cache = os.path.join(dish_dir, f"visual_{lang}.txt")
         if os.path.exists(visual_cache):
-            emit_progress('visual', 'Using cached visual text', 60)
+            jm.update_progress(job_id, 'visual', 'Using cached visual text', 60)
             with open(visual_cache, "r") as f:
                 visual_text = f.read()
         else:
@@ -334,9 +531,11 @@ def process_video_task(url):
                 with open(visual_cache, "w") as f:
                     f.write(visual_text)
             except Exception as e:
-                emit_progress(
-                    'visual', f'Warning: Could not extract visual text: {e}', 60)
-        emit_progress('visual', 'Visual text extracted', 65)
+                jm.update_progress(job_id, 'visual', f'Warning: Could not extract visual text: {e}', 60)
+        jm.update_progress(job_id, 'visual', 'Visual text extracted', 65)
+
+        if jm.is_cancelled(job_id):
+            return
 
         # Combine transcription
         combined_transcription = transcription
@@ -348,7 +547,7 @@ def process_video_task(url):
 {visual_text}"""
 
         # Step 5: Extract dish image candidates
-        emit_progress('image', 'Extracting dish image candidates...', 70)
+        jm.update_progress(job_id, 'image', 'Extracting dish image candidates...', 70)
         image_path = None
         image_candidates = []
         best_image_index = 0
@@ -357,7 +556,7 @@ def process_video_task(url):
         
         # Check if we have cached candidates
         if os.path.exists(frames_dir) and os.path.exists(image_cache):
-            emit_progress('image', 'Using cached dish images', 75)
+            jm.update_progress(job_id, 'image', 'Using cached dish images', 75)
             image_path = image_cache
             # Load all cached candidate images
             candidate_files = sorted([
@@ -372,26 +571,31 @@ def process_video_task(url):
                 image_candidates = result.get('candidates', [])
                 best_image_index = result.get('best_index', 0)
             except Exception as e:
-                emit_progress(
-                    'image', f'Warning: Could not extract image: {e}', 75)
-        emit_progress('image', 'Image candidates extracted', 80)
+                jm.update_progress(job_id, 'image', f'Warning: Could not extract image: {e}', 75)
+        jm.update_progress(job_id, 'image', 'Image candidates extracted', 80)
+
+        if jm.is_cancelled(job_id):
+            return
 
         # Step 6: Create recipe with AI
-        emit_progress('evaluate', 'Creating recipe with AI...', 85)
+        jm.update_progress(job_id, 'evaluate', 'Creating recipe with AI...', 85)
         chef = Chef(source_url=url, description=description,
                     transcription=combined_transcription)
         recipe_data = chef.create_recipe()
 
         if not recipe_data:
-            emit_progress('error', 'Failed to create recipe', 100)
+            jm.fail_job(job_id, 'Failed to create recipe')
             return
 
-        emit_progress('evaluate', 'Recipe created successfully', 90)
+        jm.update_progress(job_id, 'evaluate', 'Recipe created successfully', 90)
+
+        if jm.is_cancelled(job_id):
+            return
 
         # Step 7: Upload to target (with optional preview confirmation)
         if config.CONFIRM_BEFORE_UPLOAD:
             # Show preview and wait for user confirmation
-            emit_progress('preview', 'Waiting for your confirmation...', 90)
+            jm.update_progress(job_id, 'preview', 'Waiting for your confirmation...', 90)
 
             # Prepare image data for preview if available (best image first, then candidates)
             image_data = None
@@ -422,11 +626,24 @@ def process_video_task(url):
                 'output_target': config.OUTPUT_TARGET,
                 'event': confirm_event,
                 'confirmed': None,
-                'selected_image_index': best_image_index  # Default to AI-selected best
+                'selected_image_index': best_image_index,
+                'job_id': job_id
             }
 
             # Send preview to client with all candidate images
             socketio.emit('recipe_preview', {
+                'job_id': job_id,
+                'upload_id': upload_id,
+                'recipe': recipe_data,
+                'image_data': image_data,
+                'candidate_images': candidate_images_data,
+                'best_image_index': best_image_index,
+                'output_target': config.OUTPUT_TARGET
+            }, room=f'job_{job_id}')
+            
+            # Also broadcast for legacy clients
+            socketio.emit('recipe_preview', {
+                'job_id': job_id,
                 'upload_id': upload_id,
                 'recipe': recipe_data,
                 'image_data': image_data,
@@ -435,20 +652,26 @@ def process_video_task(url):
                 'output_target': config.OUTPUT_TARGET
             })
 
-            # Wait for user response (with timeout) - threading.Event.wait returns True if set, False on timeout
+            # Wait for user response (with timeout)
             confirmed = confirm_event.wait(timeout=300)  # 5 minute timeout
             
             # Check if we actually got a confirmation or just timed out
             pending_data = pending_uploads.pop(upload_id, None)
             
             if not confirmed:
-                emit_progress('error', 'Upload confirmation timed out', 100)
+                jm.fail_job(job_id, 'Upload confirmation timed out')
                 return
             
             if pending_data and not pending_data.get('confirmed', False):
-                emit_progress('cancelled', 'Upload cancelled by user', 100)
+                jm.update_progress(job_id, 'cancelled', 'Upload cancelled by user', 100)
                 socketio.emit('recipe_cancelled', {
-                              'message': 'Recipe upload was cancelled'})
+                    'job_id': job_id,
+                    'message': 'Recipe upload was cancelled'
+                }, room=f'job_{job_id}')
+                socketio.emit('recipe_cancelled', {
+                    'job_id': job_id,
+                    'message': 'Recipe upload was cancelled'
+                })
                 return
             
             # Use the user-selected image if available
@@ -456,11 +679,12 @@ def process_video_task(url):
             if image_candidates and 0 <= selected_idx < len(image_candidates):
                 image_path = image_candidates[selected_idx]
 
-            emit_progress(
-                'upload', f'Uploading to {config.OUTPUT_TARGET}...', 95)
+            jm.update_progress(job_id, 'upload', f'Uploading to {config.OUTPUT_TARGET}...', 95)
         else:
-            emit_progress(
-                'upload', f'Uploading to {config.OUTPUT_TARGET}...', 95)
+            jm.update_progress(job_id, 'upload', f'Uploading to {config.OUTPUT_TARGET}...', 95)
+
+        if jm.is_cancelled(job_id):
+            return
 
         if config.OUTPUT_TARGET == 'tandoor':
             from tandoor import Tandoor
@@ -476,26 +700,38 @@ def process_video_task(url):
             if image_path and recipe_slug:
                 mealie.upload_image(recipe_slug, image_path)
 
-        emit_progress('complete', 'Recipe uploaded successfully!', 100)
-        socketio.emit('recipe_complete', {'recipe': recipe_data})
+        # Complete the job
+        jm.complete_job(job_id, recipe_data, image_path, config.OUTPUT_TARGET)
+        jm.update_progress(job_id, 'complete', 'Recipe uploaded successfully!', 100)
 
     except Exception as e:
-        emit_progress('error', f'Error: {str(e)}', 100)
+        jm.fail_job(job_id, f'Error: {str(e)}')
 
 
-def emit_progress(stage, message, percent):
-    """Emit progress update via WebSocket."""
-    socketio.emit('progress', {
-        'stage': stage,
-        'message': message,
-        'percent': percent
-    })
-
+# ===== WebSocket Handlers =====
 
 @socketio.on('connect')
 def handle_connect():
     """Handle WebSocket connection."""
     emit('connected', {'status': 'Connected to server'})
+
+
+@socketio.on('subscribe_job')
+def handle_subscribe_job(data):
+    """Subscribe to a specific job's updates."""
+    job_id = data.get('job_id')
+    if job_id:
+        join_room(f'job_{job_id}')
+        emit('subscribed', {'job_id': job_id, 'status': 'subscribed'})
+
+
+@socketio.on('unsubscribe_job')
+def handle_unsubscribe_job(data):
+    """Unsubscribe from a specific job's updates."""
+    job_id = data.get('job_id')
+    if job_id:
+        leave_room(f'job_{job_id}')
+        emit('unsubscribed', {'job_id': job_id, 'status': 'unsubscribed'})
 
 
 @socketio.on('confirm_upload')
@@ -508,7 +744,7 @@ def handle_confirm_upload(data):
         # Store the user's selected image index if provided
         if selected_image_index is not None:
             pending_uploads[upload_id]['selected_image_index'] = selected_image_index
-        pending_uploads[upload_id]['event'].set()  # threading.Event uses set()
+        pending_uploads[upload_id]['event'].set()
 
 
 @socketio.on('cancel_upload')
@@ -517,7 +753,7 @@ def handle_cancel_upload(data):
     upload_id = data.get('upload_id')
     if upload_id and upload_id in pending_uploads:
         pending_uploads[upload_id]['confirmed'] = False
-        pending_uploads[upload_id]['event'].set()  # threading.Event uses set()
+        pending_uploads[upload_id]['event'].set()
 
 
 if __name__ == '__main__':
