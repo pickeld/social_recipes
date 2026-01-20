@@ -472,9 +472,13 @@ document.addEventListener('DOMContentLoaded', function() {
         currentPreviewJobId = data.job_id;
         selectedImageIndex = data.best_image_index || 0;
         
-        // Set target name
+        // Set target name (with dual export badge if needed)
         if (previewTarget) {
-            previewTarget.textContent = data.output_target || 'recipe manager';
+            if (data.export_to_both) {
+                previewTarget.innerHTML = '<span class="dual-export-badge"><i class="fas fa-sync-alt"></i> Both</span> Tandoor & Mealie';
+            } else {
+                previewTarget.textContent = data.output_target || 'recipe manager';
+            }
         }
         
         // Build image candidates grid

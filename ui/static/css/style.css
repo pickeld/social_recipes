@@ -1559,3 +1559,66 @@ main.with-sidebar {
         font-size: 0.65rem;
     }
 }
+
+/* ===== Export/Import Settings ===== */
+.section-description {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    margin-bottom: 1rem;
+}
+
+.settings-section .btn {
+    margin-right: 0.5rem;
+}
+
+/* File input label styled as button */
+.settings-section label.btn {
+    display: inline-flex;
+    cursor: pointer;
+}
+
+/* Dual Export Badge */
+.dual-export-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    background-color: var(--info-color);
+    color: white;
+    font-size: 0.75rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-weight: 500;
+}
+
+.dual-export-badge i {
+    font-size: 0.7rem;
+}
+
+/* Export target display in preview */
+.export-targets {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+
+.export-target-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    background-color: var(--bg-color);
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    padding: 0.35rem 0.75rem;
+    border-radius: 4px;
+    border: 1px solid var(--border-color);
+}
+
+.export-target-tag.active {
+    background-color: var(--primary-color);
+    color: white;
+    border-color: var(--primary-color);
+}
+
+.export-target-tag i {
+    font-size: 0.75rem;
+}

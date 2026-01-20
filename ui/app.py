@@ -688,6 +688,12 @@ def process_video_job(job_id, jm):
                 'job_id': job_id
             }
 
+            # Determine display target for preview
+            if config.EXPORT_TO_BOTH:
+                display_target = 'Tandoor & Mealie'
+            else:
+                display_target = config.OUTPUT_TARGET.capitalize()
+
             # Send preview to client with all candidate images
             socketio.emit('recipe_preview', {
                 'job_id': job_id,
@@ -696,7 +702,8 @@ def process_video_job(job_id, jm):
                 'image_data': image_data,
                 'candidate_images': candidate_images_data,
                 'best_image_index': best_image_index,
-                'output_target': config.OUTPUT_TARGET
+                'output_target': display_target,
+                'export_to_both': config.EXPORT_TO_BOTH
             }, room=f'job_{job_id}')
             
             # Also broadcast for legacy clients
@@ -707,7 +714,8 @@ def process_video_job(job_id, jm):
                 'image_data': image_data,
                 'candidate_images': candidate_images_data,
                 'best_image_index': best_image_index,
-                'output_target': config.OUTPUT_TARGET
+                'output_target': display_target,
+                'export_to_both': config.EXPORT_TO_BOTH
             })
 
             # Wait for user response (with timeout)
