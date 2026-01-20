@@ -30,5 +30,5 @@ EXPOSE 5006
 ENV FLASK_DEBUG=false
 ENV PYTHONPATH=/app
 
-# Run the Flask application
-CMD ["python", "ui/app.py"]
+# Upgrade yt-dlp to latest version on startup and run the Flask application
+CMD ["sh", "-c", "pip install --upgrade yt-dlp && python ui/app.py"]
