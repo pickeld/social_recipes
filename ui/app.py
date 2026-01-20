@@ -10,7 +10,7 @@ import base64
 import secrets
 import threading
 import json
-from datetime import timedelta
+from datetime import datetime, timedelta
 from functools import wraps
 
 from dotenv import load_dotenv
@@ -242,6 +242,7 @@ def settings():
         config['tandoor_host'] = request.form.get('tandoor_host', '')
         config['target_language'] = request.form.get('target_language', 'he')
         config['output_target'] = request.form.get('output_target', 'tandoor')
+        config['export_to_both'] = 'true' if request.form.get('export_to_both') else 'false'
         config['whisper_model'] = request.form.get('whisper_model', 'small')
         config['hf_token'] = request.form.get('hf_token', '')
         # Checkbox: present in form data only when checked
@@ -425,6 +426,63 @@ def reupload_recipe(history_id):
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+# ===== Settings Export/Import API Endpoints =====
+
+@app.route('/api/settings/export', methods=['GET'])
+@api_login_required
+def export_settings():
+    """Export all settings as JSON for backup/transfer."""
+    config = load_config()
+    
+    # Create export data with metadata
+    export_data = {
+        'version': '1.0',
+        'exported_at': datetime.now().isoformat(),
+        'settings': config
+    }
+    
+    return jsonify(export_data)
+
+
+@app.route('/api/settings/import', methods=['POST'])
+@api_login_required
+def import_settings():
+    """Import settings from a JSON backup file."""
+    from config import DEFAULT_CONFIG
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+    
+    # Handle both direct settings and wrapped format
+    if 'settings' in data:
+        settings = data['settings']
+    else:
+        settings = data
+    
+    # Validate that we have a dictionary
+    if not isinstance(settings, dict):
+        return jsonify({'error': 'Invalid settings format'}), 400
+    
+    # Only import known configuration keys
+    valid_keys = set(DEFAULT_CONFIG.keys())
+    filtered_settings = {k: v for k, v in settings.items() if k in valid_keys}
+    
+    if not filtered_settings:
+        return jsonify({'error': 'No valid settings found in import data'}), 400
+    
+    # Save the imported settings
+    current_config = load_config()
+    current_config.update(filtered_settings)
+    save_config(current_config)
+    
+    return jsonify({
+        'status': 'success',
+        'message': f'Imported {len(filtered_settings)} settings',
+        'imported_keys': list(filtered_settings.keys())
+    })
 
 
 # ===== Legacy API (kept for backward compatibility) =====
@@ -686,23 +744,59 @@ def process_video_job(job_id, jm):
         if jm.is_cancelled(job_id):
             return
 
-        if config.OUTPUT_TARGET == 'tandoor':
-            from tandoor import Tandoor
-            tandoor = Tandoor()
-            result = tandoor.create_recipe(recipe_data)
-            if image_path and result.get("id"):
-                tandoor.upload_image(result["id"], image_path)
-        elif config.OUTPUT_TARGET == 'mealie':
-            from mealie import Mealie
-            mealie = Mealie()
-            result = mealie.create_recipe(recipe_data)
-            recipe_slug = result.get("slug") or result.get("id")
-            if image_path and recipe_slug:
-                mealie.upload_image(recipe_slug, image_path)
+        # Determine upload targets
+        upload_targets = []
+        if config.EXPORT_TO_BOTH:
+            # Export to both Tandoor and Mealie
+            upload_targets = ['tandoor', 'mealie']
+            jm.update_progress(job_id, 'upload', 'Uploading to Tandoor and Mealie...', 95)
+        else:
+            # Export to single target
+            upload_targets = [config.OUTPUT_TARGET]
 
-        # Complete the job
-        jm.complete_job(job_id, recipe_data, image_path, config.OUTPUT_TARGET)
-        jm.update_progress(job_id, 'complete', 'Recipe uploaded successfully!', 100)
+        upload_results = []
+        
+        for target in upload_targets:
+            try:
+                if target == 'tandoor':
+                    from tandoor import Tandoor
+                    tandoor = Tandoor()
+                    result = tandoor.create_recipe(recipe_data)
+                    if image_path and result.get("id"):
+                        tandoor.upload_image(result["id"], image_path)
+                    upload_results.append(('tandoor', True, None))
+                elif target == 'mealie':
+                    from mealie import Mealie
+                    mealie = Mealie()
+                    result = mealie.create_recipe(recipe_data)
+                    recipe_slug = result.get("slug") or result.get("id")
+                    if image_path and recipe_slug:
+                        mealie.upload_image(recipe_slug, image_path)
+                    upload_results.append(('mealie', True, None))
+            except Exception as upload_error:
+                upload_results.append((target, False, str(upload_error)))
+
+        # Determine final output target for history
+        final_target = ', '.join(upload_targets) if config.EXPORT_TO_BOTH else config.OUTPUT_TARGET
+        
+        # Check if any uploads failed
+        failed_uploads = [r for r in upload_results if not r[1]]
+        if failed_uploads and len(failed_uploads) == len(upload_targets):
+            # All uploads failed
+            error_msgs = '; '.join([f"{r[0]}: {r[2]}" for r in failed_uploads])
+            jm.fail_job(job_id, f'All uploads failed: {error_msgs}')
+            return
+        elif failed_uploads:
+            # Some uploads succeeded, some failed
+            success_targets = [r[0] for r in upload_results if r[1]]
+            failed_msgs = '; '.join([f"{r[0]}: {r[2]}" for r in failed_uploads])
+            jm.complete_job(job_id, recipe_data, image_path, ', '.join(success_targets))
+            jm.update_progress(job_id, 'complete',
+                f'Recipe uploaded to {", ".join(success_targets)}. Failed: {failed_msgs}', 100)
+        else:
+            # All uploads succeeded
+            jm.complete_job(job_id, recipe_data, image_path, final_target)
+            jm.update_progress(job_id, 'complete', f'Recipe uploaded successfully to {final_target}!', 100)
 
     except Exception as e:
         jm.fail_job(job_id, f'Error: {str(e)}')

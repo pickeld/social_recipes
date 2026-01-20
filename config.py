@@ -26,6 +26,7 @@ DEFAULT_CONFIG = {
     "tandoor_host": "",
     "target_language": "he",
     "output_target": "tandoor",
+    "export_to_both": "false",
     "whisper_model": "small",
     "confirm_before_upload": "true",
     "hf_token": ""
@@ -126,6 +127,11 @@ class Config:
     @property
     def OUTPUT_TARGET(self) -> str:
         return self._get('output_target', DEFAULT_CONFIG['output_target'])
+
+    @property
+    def EXPORT_TO_BOTH(self) -> bool:
+        value = self._get('export_to_both', DEFAULT_CONFIG['export_to_both'])
+        return value.lower() in ('true', '1', 'yes', 'on')
 
     @property
     def WHISPER_MODEL(self) -> str:
