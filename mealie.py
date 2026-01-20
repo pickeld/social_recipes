@@ -157,6 +157,13 @@ class Mealie(RecipeExporter):
                     "ingredientReferences": []
                 })
 
+        # Get source URL from recipe data
+        source_url = (
+            original_recipe_schema.get("url") or
+            original_recipe_schema.get("source_url") or
+            ""
+        )
+
         update_payload = {
             "name": original_recipe_schema.get("name") or original_recipe_schema.get("title") or "Untitled",
             "description": original_recipe_schema.get("description") or "",
@@ -165,6 +172,7 @@ class Mealie(RecipeExporter):
             "recipeServings": ry_qty,
             "recipeIngredient": ingredients,
             "recipeInstructions": instructions,
+            "orgURL": source_url,  # Mealie uses orgURL for the source URL
         }
         
         # Add nutrition if available
