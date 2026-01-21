@@ -87,6 +87,8 @@ class Mealie(RecipeExporter):
             "recipeIngredientStructured") or []
         ingredients = []
         
+        logger.info(f"[Mealie] Building ingredients: structured={len(ing_struct) if ing_struct else 0}")
+        
         # If no structured ingredients, fall back to simple ingredient strings
         if not ing_struct:
             simple_ingredients = original_recipe_schema.get("recipeIngredient") or []
@@ -176,10 +178,15 @@ class Mealie(RecipeExporter):
         }
         
         # Add nutrition if available
+        nutrition_data = original_recipe_schema.get("nutrition")
+        logger.info(f"[Mealie] Recipe nutrition data: {nutrition_data}")
         nutrition = self._build_nutrition(original_recipe_schema)
+        logger.info(f"[Mealie] Built nutrition: {nutrition}")
         if nutrition:
             update_payload["nutrition"] = nutrition
             self._log(f"Including nutrition: {nutrition}")
+        else:
+            logger.warning("[Mealie] No nutrition to include")
         
         return update_payload
 
@@ -257,16 +264,8 @@ class Mealie(RecipeExporter):
             self._log("Unable to fetch current dict; returning primitive response.")
             return {"id_or_slug": ident, "raw": created}
 
-        ingr_list = current.get("recipeIngredient") or []
-        placeholder = (
-            isinstance(ingr_list, list)
-            and len(ingr_list) == 1
-            and isinstance(ingr_list[0], dict)
-            and (ingr_list[0].get("note") == "1 Cup Flour" or ingr_list[0].get("display") == "1 Cup Flour")
-        )
-        if not placeholder and ingr_list:
-            self._log(f"Server already populated ingredients ({len(ingr_list)}). Skipping update.")
-            return current
+        # Always update with our structured data - Mealie's initial creation doesn't include our ingredients
+        # The old logic would skip update if server had any ingredients, which caused data loss
 
         # Build update payload - merge with existing recipe to ensure all required fields present
         update_fields = self._build_update_payload(recipe_data)

@@ -147,6 +147,7 @@ class Chef:
         # overwrite structured list - use both keys for compatibility
         data["recipeIngredients"] = clean
         data["recipeIngredientStructured"] = clean  # Used by mealie.py and tandoor.py exporters
+        logger.info(f"[Chef] Set recipeIngredientStructured with {len(clean)} ingredients")
 
         # overwrite Schema.org recipeIngredient with a simple flattened list
         flattened = []
@@ -248,6 +249,7 @@ class Chef:
             logger.info(f"Estimated totalTime: {est['totalTime']}")
 
         # Apply nutrition if needed
+        logger.info(f"[Chef] need_nutrition={need_nutrition}, est nutrition={est.get('nutrition')}")
         if need_nutrition and isinstance(est.get("nutrition"), dict):
             allowed = {
                 "@type", "calories", "proteinContent", "fatContent", "carbohydrateContent",
@@ -262,5 +264,10 @@ class Chef:
                                             "carbohydrateContent", "fiberContent",
                                             "sugarContent", "sodiumContent", "cholesterolContent")):
                 recipe["nutrition"] = nutrition
+                logger.info(f"[Chef] Added nutrition to recipe: {nutrition}")
+            else:
+                logger.warning("[Chef] Nutrition dict had no valid fields")
+        else:
+            logger.warning(f"[Chef] Skipping nutrition: need_nutrition={need_nutrition}")
 
         return recipe

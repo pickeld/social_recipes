@@ -45,6 +45,8 @@ class Tandoor(RecipeExporter):
 
         # Prefer structured ingredients
         ing_struct = recipe_data.get("recipeIngredientStructured") or []
+        logger.info(f"[Tandoor] Building ingredients: structured={len(ing_struct) if ing_struct else 0}")
+        
         if isinstance(ing_struct, list) and ing_struct:
             for item in ing_struct:
                 if not isinstance(item, dict):
@@ -453,10 +455,15 @@ class Tandoor(RecipeExporter):
             payload["keywords"] = keywords
         
         # Add nutrition if available
+        nutrition_data = recipe_data.get("nutrition")
+        logger.info(f"[Tandoor] Recipe nutrition data: {nutrition_data}")
         nutrition = self._build_nutrition(recipe_data)
+        logger.info(f"[Tandoor] Built nutrition: {nutrition}")
         if nutrition:
             payload["nutrition"] = nutrition
             self._log(f"Including nutrition: {nutrition}")
+        else:
+            logger.warning("[Tandoor] No nutrition to include")
         
         return payload
 
