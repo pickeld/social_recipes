@@ -8,7 +8,7 @@ import os
 from config import config
 
 from recipe_exporter import RecipeExporter
-from helpers import coerce_num, extract_servings, parse_nutrition_value, setup_logger
+from helpers import coerce_num, extract_servings, setup_logger
 
 logger = setup_logger(__name__)
 
@@ -172,11 +172,10 @@ class Mealie(RecipeExporter):
         ry_qty = extract_servings(original_recipe_schema)
 
         # Ingredients - build from structured data
-        ing_struct = original_recipe_schema.get(
-            "recipeIngredientStructured") or []
+        ing_struct = original_recipe_schema.get("recipeIngredients") or []
         ingredients = []
         
-        logger.info(f"[Mealie] Building ingredients: structured={len(ing_struct) if ing_struct else 0}")
+        logger.info(f"[Mealie] Building ingredients: {len(ing_struct) if ing_struct else 0}")
         
         # If no structured ingredients, fall back to simple ingredient strings
         if not ing_struct:

@@ -6,8 +6,6 @@ API documentation: https://docs.tandoor.dev/api/
 """
 
 from config import config
-import re
-
 from recipe_exporter import RecipeExporter
 from helpers import coerce_num, parse_iso_duration, extract_servings, parse_nutrition_value, setup_logger
 
@@ -30,143 +28,48 @@ class Tandoor(RecipeExporter):
 
     def _build_ingredients(self, recipe_data: dict) -> list[dict]:
         """
-        Build Tandoor ingredient list from recipe data.
+        Build Tandoor ingredient list from structured recipe data.
         
-        According to Tandoor API (v2.3.6):
-        - Ingredient requires: amount (float), food (Food|null), unit (Unit|null)
-        - Food requires: name (string, minLength: 1)
-        - Unit requires: name (string, minLength: 1)
-        
-        Tandoor will auto-create units and foods when given objects with just 'name'.
-        When no food/unit is available, pass null (not an empty object).
+        Expects recipeIngredients from LLM with: food, quantity, unit, notes, raw
+        Tandoor API requires: food ({"name": str}), unit ({"name": str} or null), amount (float)
         """
-        ingredients = []
-        order = 0
-
-        # Prefer structured ingredients
-        ing_struct = recipe_data.get("recipeIngredientStructured") or []
-        logger.info(f"[Tandoor] Building ingredients: structured={len(ing_struct) if ing_struct else 0}")
+        ing_struct = recipe_data.get("recipeIngredients") or []
         
-        if isinstance(ing_struct, list) and ing_struct:
-            for item in ing_struct:
-                if not isinstance(item, dict):
-                    continue
+        if not isinstance(ing_struct, list) or not ing_struct:
+            logger.warning("[Tandoor] No structured ingredients found")
+            return []
+        
+        ingredients = []
+        for order, item in enumerate(ing_struct):
+            if not isinstance(item, dict):
+                continue
 
-                raw = (
-                    item.get("raw") or item.get("normalized") or ""
-                ).strip()
-                qty_s = (item.get("quantity") or "").strip()
-                unit_name = (item.get("unit") or "").strip()
-                food_name = (item.get("food") or "").strip()
-                modifiers = item.get("modifiers") or []
-                if isinstance(modifiers, str):
-                    modifiers = [m.strip()
-                                 for m in modifiers.split(",") if m.strip()]
-                notes = (item.get("notes") or "").strip()
+            raw = (item.get("raw") or "").strip()
+            qty_s = (item.get("quantity") or "").strip()
+            unit_name = (item.get("unit") or "").strip()
+            food_name = (item.get("food") or "").strip()
+            notes = (item.get("notes") or "").strip()
+            
+            # Food name is required - use fallbacks if needed
+            if not food_name:
+                food_name = raw[:128] if raw else None
+            if not food_name:
+                logger.warning(f"[Tandoor] Skipping ingredient with no food name: {item}")
+                continue
 
-                # Combine modifiers + notes
-                note_parts = []
-                if notes:
-                    note_parts.append(notes)
-                if modifiers:
-                    note_parts.append(" ".join(modifiers))
-                note = " | ".join([p for p in note_parts if p]) or None
+            amount = coerce_num(qty_s)
+            ingredients.append({
+                "amount": amount if amount > 0 else 0,
+                "unit": {"name": unit_name} if unit_name else None,
+                "food": {"name": food_name[:128]},
+                "note": notes,
+                "order": order,
+                "is_header": False,
+                "no_amount": amount == 0,
+                "original_text": raw[:512] if raw else "",
+            })
 
-                amount = coerce_num(qty_s)
-                
-                # Tandoor API: food and unit must be objects with 'name' field or null
-                # Do NOT pass empty objects {} - only {"name": "value"} or null
-                unit_obj = {"name": unit_name} if unit_name else None
-                food_obj = {"name": food_name} if food_name else None
-
-                # If we have no food name but have raw text, use raw text as food name
-                # This ensures Tandoor has something to display
-                if not food_obj and raw:
-                    food_obj = {"name": raw[:128]}  # Tandoor food name max is 128 chars
-
-                ingredient = {
-                    "amount": amount if amount > 0 else 0,
-                    "unit": unit_obj,
-                    "food": food_obj,
-                    "note": note or "",
-                    "order": order,
-                    "is_header": False,
-                    "no_amount": amount == 0,
-                }
-                
-                # Store original text for reference
-                if raw:
-                    ingredient["original_text"] = raw[:512]  # max 512 chars per API
-                    
-                ingredients.append(ingredient)
-                order += 1
-        else:
-            # Fallback to simple ingredient strings
-            for line in recipe_data.get("recipeIngredient", []):
-                if not isinstance(line, str):
-                    continue
-                raw = line.strip()
-                if not raw:
-                    continue
-
-                # Enhanced parsing: number + optional unit + rest as food
-                # Pattern: optional amount, optional unit, required food
-                m2 = re.match(
-                    r"^\s*(\d+(?:[.,]\d+)?(?:\s*[-–]\s*\d+(?:[.,]\d+)?)?)?[\s]*"  # amount (optional, with range support)
-                    r"([a-zA-Z]+(?:\s+[a-zA-Z]+)?)?[\s]*"  # unit (optional, 1-2 words)
-                    r"(.+)?$",  # food (rest)
-                    raw
-                )
-                amount = 0
-                unit_name = ""
-                food_name = ""
-
-                if m2:
-                    amount = coerce_num(m2.group(1) or "")
-                    potential_unit = (m2.group(2) or "").strip()
-                    food_name = (m2.group(3) or "").strip()
-                    
-                    # Common unit abbreviations and names
-                    common_units = {
-                        'g', 'kg', 'mg', 'lb', 'lbs', 'oz', 'ml', 'l', 'dl', 'cl',
-                        'cup', 'cups', 'tbsp', 'tsp', 'tablespoon', 'tablespoons',
-                        'teaspoon', 'teaspoons', 'piece', 'pieces', 'slice', 'slices',
-                        'clove', 'cloves', 'pinch', 'bunch', 'can', 'cans',
-                        'package', 'packages', 'pkg', 'jar', 'bottle', 'head',
-                        'stalk', 'stalks', 'sprig', 'sprigs', 'handful', 'dash'
-                    }
-                    
-                    # Only treat as unit if it's a known unit
-                    if potential_unit.lower() in common_units:
-                        unit_name = potential_unit
-                    else:
-                        # Not a known unit, prepend to food name
-                        if potential_unit and food_name:
-                            food_name = f"{potential_unit} {food_name}"
-                        elif potential_unit:
-                            food_name = potential_unit
-
-                # Ensure food_name exists; use raw if needed
-                if not food_name:
-                    food_name = raw
-
-                # Build objects according to Tandoor API spec
-                unit_obj = {"name": unit_name} if unit_name else None
-                food_obj = {"name": food_name[:128]} if food_name else None  # max 128 chars
-
-                ingredient = {
-                    "amount": amount if amount > 0 else 0,
-                    "unit": unit_obj,
-                    "food": food_obj,
-                    "note": "",
-                    "order": order,
-                    "is_header": False,
-                    "no_amount": amount == 0,
-                    "original_text": raw[:512],  # max 512 chars per API
-                }
-                ingredients.append(ingredient)
-                order += 1
-
+        logger.info(f"[Tandoor] Built {len(ingredients)} ingredients")
         return ingredients
 
     def _build_steps(self, recipe_data: dict) -> list[dict]:
@@ -436,6 +339,8 @@ class Tandoor(RecipeExporter):
         # Attach all ingredients to the first step (Tandoor's model)
         if steps and ingredients:
             steps[0]["ingredients"] = ingredients
+        elif not ingredients:
+            logger.warning("[Tandoor] No ingredients found in recipe data")
 
         payload = {
             "name": name,
@@ -450,20 +355,12 @@ class Tandoor(RecipeExporter):
             "steps": steps,
         }
         
-        # Add keywords if any were extracted
         if keywords:
             payload["keywords"] = keywords
         
-        # Add nutrition if available
-        nutrition_data = recipe_data.get("nutrition")
-        logger.info(f"[Tandoor] Recipe nutrition data: {nutrition_data}")
         nutrition = self._build_nutrition(recipe_data)
-        logger.info(f"[Tandoor] Built nutrition: {nutrition}")
         if nutrition:
             payload["nutrition"] = nutrition
-            self._log(f"Including nutrition: {nutrition}")
-        else:
-            logger.warning("[Tandoor] No nutrition to include")
         
         return payload
 
@@ -475,41 +372,27 @@ class Tandoor(RecipeExporter):
         Tandoor automatically creates units and foods when given just names,
         so no pre-creation API calls are needed.
         """
-        logger.info("[Upload] Starting Tandoor recipe upload...")
         headers = self._build_headers()
         payload = self._to_tandoor_payload(recipe_data)
         create_url = f"{self.base_url}/api/recipe/"
 
         recipe_name = payload.get('name', 'Unknown')
-        logger.info(f"[Upload] Creating recipe in Tandoor: {recipe_name}")
-        logger.info(f"[Tandoor] Payload has nutrition: {'nutrition' in payload}, value: {payload.get('nutrition')}")
+        logger.info(f"[Tandoor] Creating recipe: {recipe_name}")
         self._log(f"Creating recipe: {recipe_name}")
-        self._log(f"POST {create_url}")
 
         resp = self._session.post(create_url, json=payload, headers=headers, timeout=120)
-        self._log(f"Response status: {resp.status_code}")
 
         if resp.status_code >= 400:
-            logger.error(f"[Upload] Failed to create recipe in Tandoor: HTTP {resp.status_code}")
-            self._log(f"Error response: {resp.text[:1000]}")
+            logger.error(f"[Tandoor] Failed to create recipe: HTTP {resp.status_code}")
+            self._log(f"Error: {resp.text[:500]}")
             resp.raise_for_status()
-
-        logger.info(f"[Upload] Recipe created successfully (HTTP {resp.status_code})")
 
         try:
             result = resp.json()
             recipe_id = result.get('id')
-            logger.info(f"[Upload] Recipe ID: {recipe_id}")
-            self._log(f"Recipe created with ID: {recipe_id}")
-            
-            # Log what Tandoor returned for nutrition
-            returned_nutrition = result.get('nutrition')
-            logger.info(f"[Tandoor] Response nutrition: {returned_nutrition}")
-            if not returned_nutrition:
-                logger.warning("[Tandoor] Nutrition was NOT saved by Tandoor API!")
-            
+            logger.info(f"[Tandoor] Recipe created with ID: {recipe_id}")
+            self._log(f"Recipe ID: {recipe_id}")
             return result
         except Exception as e:
-            logger.warning(f"[Upload] Could not parse response JSON: {e}")
-            self._log(f"JSON parse error: {e}")
+            logger.warning(f"[Tandoor] Could not parse response: {e}")
             return {"raw": resp.text}

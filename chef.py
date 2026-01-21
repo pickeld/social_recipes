@@ -1,5 +1,4 @@
 import json
-import re
 from datetime import datetime, timezone
 
 from config import config
@@ -144,12 +143,11 @@ class Chef:
                 seen_foods[food_key] = len(clean)
                 clean.append({"food": food, "quantity": qty, "unit": unit, "notes": notes, "raw": raw_line})
 
-        # overwrite structured list - use both keys for compatibility
+        # Store structured ingredients
         data["recipeIngredients"] = clean
-        data["recipeIngredientStructured"] = clean  # Used by mealie.py and tandoor.py exporters
-        logger.info(f"[Chef] Set recipeIngredientStructured with {len(clean)} ingredients")
+        logger.info(f"[Chef] Processed {len(clean)} ingredients")
 
-        # overwrite Schema.org recipeIngredient with a simple flattened list
+        # Create Schema.org recipeIngredient (flattened strings) for compatibility
         flattened = []
         for i in clean:
             parts = [i["quantity"], i["unit"], i["food"], i.get("notes", "")]
