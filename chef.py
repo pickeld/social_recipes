@@ -95,11 +95,15 @@ class Chef:
             food = " ".join(str(i.get("food", "")).split()).strip()
             qty = " ".join(str(i.get("quantity", "")).split()).strip()
             unit = " ".join(str(i.get("unit", "")).split()).strip()
-            note = " ".join(str(i.get("note", "")).split()).strip()
+            notes = " ".join(str(i.get("notes", "")).split()).strip()
+            raw_from_llm = (i.get("raw") or "").strip()
             if not food:
                 continue
             
             food_key = food.casefold()
+            # Generate raw line for display (use LLM-provided raw if available)
+            raw_line = raw_from_llm or " ".join(p for p in [qty, unit, food, notes] if p).strip()
+            
             if food_key in seen_foods:
                 # Merge duplicate: combine quantities or notes
                 existing_idx = seen_foods[food_key]
@@ -107,11 +111,11 @@ class Chef:
                 
                 # If same quantity and unit, just merge notes
                 if existing["quantity"] == qty and existing["unit"] == unit:
-                    if note and note not in existing["note"]:
-                        if existing["note"]:
-                            existing["note"] = f"{existing['note']}, {note}"
+                    if notes and notes not in existing["notes"]:
+                        if existing["notes"]:
+                            existing["notes"] = f"{existing['notes']}, {notes}"
                         else:
-                            existing["note"] = note
+                            existing["notes"] = notes
                 # If different quantities, combine them (e.g., "1 + 1" or just add second amount)
                 elif qty and existing["quantity"]:
                     # Try to add numeric quantities
@@ -122,31 +126,33 @@ class Chef:
                             # Same unit, sum them up
                             total = existing_num + new_num
                             existing["quantity"] = str(int(total) if total == int(total) else total)
-                            if note and note not in existing["note"]:
-                                if existing["note"]:
-                                    existing["note"] = f"{existing['note']}, {note}"
+                            if notes and notes not in existing["notes"]:
+                                if existing["notes"]:
+                                    existing["notes"] = f"{existing['notes']}, {notes}"
                                 else:
-                                    existing["note"] = note
+                                    existing["notes"] = notes
                         else:
                             # Different units, keep both as separate entries
-                            clean.append({"food": food, "quantity": qty, "unit": unit, "note": note})
+                            clean.append({"food": food, "quantity": qty, "unit": unit, "notes": notes, "raw": raw_line})
                     except ValueError:
                         # Non-numeric quantities, keep as separate entries
-                        clean.append({"food": food, "quantity": qty, "unit": unit, "note": note})
+                        clean.append({"food": food, "quantity": qty, "unit": unit, "notes": notes, "raw": raw_line})
                 else:
                     # One or both have no quantity, keep both
-                    clean.append({"food": food, "quantity": qty, "unit": unit, "note": note})
+                    clean.append({"food": food, "quantity": qty, "unit": unit, "notes": notes, "raw": raw_line})
             else:
                 seen_foods[food_key] = len(clean)
-                clean.append({"food": food, "quantity": qty, "unit": unit, "note": note})
+                clean.append({"food": food, "quantity": qty, "unit": unit, "notes": notes, "raw": raw_line})
 
-        # overwrite structured list
+        # overwrite structured list - use both keys for compatibility
         data["recipeIngredients"] = clean
+        data["recipeIngredientStructured"] = clean  # Used by mealie.py and tandoor.py exporters
+        logger.info(f"[Chef] Set recipeIngredientStructured with {len(clean)} ingredients")
 
         # overwrite Schema.org recipeIngredient with a simple flattened list
         flattened = []
         for i in clean:
-            parts = [i["quantity"], i["unit"], i["food"], i["note"]]
+            parts = [i["quantity"], i["unit"], i["food"], i.get("notes", "")]
             line = " ".join(p for p in parts if p).strip().replace("–", "-")
             if line:
                 flattened.append(line)
@@ -243,6 +249,7 @@ class Chef:
             logger.info(f"Estimated totalTime: {est['totalTime']}")
 
         # Apply nutrition if needed
+        logger.info(f"[Chef] need_nutrition={need_nutrition}, est nutrition={est.get('nutrition')}")
         if need_nutrition and isinstance(est.get("nutrition"), dict):
             allowed = {
                 "@type", "calories", "proteinContent", "fatContent", "carbohydrateContent",
@@ -257,5 +264,10 @@ class Chef:
                                             "carbohydrateContent", "fiberContent",
                                             "sugarContent", "sodiumContent", "cholesterolContent")):
                 recipe["nutrition"] = nutrition
+                logger.info(f"[Chef] Added nutrition to recipe: {nutrition}")
+            else:
+                logger.warning("[Chef] Nutrition dict had no valid fields")
+        else:
+            logger.warning(f"[Chef] Skipping nutrition: need_nutrition={need_nutrition}")
 
         return recipe

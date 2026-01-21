@@ -55,7 +55,7 @@
             
             <div class="form-row">
                 <div class="form-group">
-                    <label for="output_target">Output Target</label>
+                    <label for="output_target">Primary Output Target</label>
                     <select id="output_target" name="output_target" class="form-select">
                         <option value="tandoor" {% if config.output_target == 'tandoor' %}selected{% endif %}>Tandoor</option>
                         <option value="mealie" {% if config.output_target == 'mealie' %}selected{% endif %}>Mealie</option>
@@ -63,14 +63,23 @@
                 </div>
                 <div class="form-group">
                     <label for="recipe_lang">Recipe Language</label>
-                    <input type="text" id="recipe_lang" name="recipe_lang" 
+                    <input type="text" id="recipe_lang" name="recipe_lang"
                            value="{{ config.recipe_lang }}" placeholder="hebrew">
                 </div>
                 <div class="form-group">
                     <label for="target_language">Target Language Code</label>
-                    <input type="text" id="target_language" name="target_language" 
+                    <input type="text" id="target_language" name="target_language"
                            value="{{ config.target_language }}" placeholder="he">
                 </div>
+            </div>
+            
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="export_to_both" name="export_to_both"
+                           {% if config.export_to_both == 'true' %}checked{% endif %}>
+                    <span class="checkbox-text">Export to both Tandoor and Mealie</span>
+                </label>
+                <small class="form-hint">When enabled, recipes will be uploaded to both recipe managers simultaneously. Make sure both are configured below.</small>
             </div>
         </div>
         
@@ -156,6 +165,30 @@
         </div>
     </form>
     
+    <!-- Export/Import Settings Section -->
+    <div class="settings-section">
+        <h2><i class="fas fa-file-export"></i> Export / Import Settings</h2>
+        <p class="section-description">Backup your settings or transfer them to another installation.</p>
+        
+        <div class="form-row">
+            <div class="form-group">
+                <button type="button" class="btn btn-secondary" id="export-settings-btn">
+                    <i class="fas fa-download"></i>
+                    Export Settings
+                </button>
+                <small class="form-hint">Download your settings (API keys, URLs, preferences) as a JSON file.</small>
+            </div>
+            <div class="form-group">
+                <label for="import-settings-file" class="btn btn-secondary">
+                    <i class="fas fa-upload"></i>
+                    Import Settings
+                </label>
+                <input type="file" id="import-settings-file" accept=".json" style="display: none;">
+                <small class="form-hint">Upload a previously exported settings file.</small>
+            </div>
+        </div>
+    </div>
+    
     <!-- Change Password Section -->
     <div class="settings-section password-section">
         <h2><i class="fas fa-key"></i> Change Password</h2>
@@ -183,4 +216,62 @@
         </form>
     </div>
 </div>
+
+<script>
+// Export settings functionality
+document.getElementById('export-settings-btn').addEventListener('click', async function() {
+    try {
+        const response = await fetch('/api/settings/export');
+        if (!response.ok) {
+            throw new Error('Failed to export settings');
+        }
+        const data = await response.json();
+        
+        // Create a blob and download it
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'social_recipes_settings.json';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    } catch (error) {
+        alert('Error exporting settings: ' + error.message);
+    }
+});
+
+// Import settings functionality
+document.getElementById('import-settings-file').addEventListener('change', async function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    try {
+        const text = await file.text();
+        const settings = JSON.parse(text);
+        
+        const response = await fetch('/api/settings/import', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(settings)
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Failed to import settings');
+        }
+        
+        alert('Settings imported successfully! The page will now reload.');
+        window.location.reload();
+    } catch (error) {
+        alert('Error importing settings: ' + error.message);
+    }
+    
+    // Reset the file input
+    e.target.value = '';
+});
+</script>
 {% endblock %}

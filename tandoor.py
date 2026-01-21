@@ -45,6 +45,8 @@ class Tandoor(RecipeExporter):
 
         # Prefer structured ingredients
         ing_struct = recipe_data.get("recipeIngredientStructured") or []
+        logger.info(f"[Tandoor] Building ingredients: structured={len(ing_struct) if ing_struct else 0}")
+        
         if isinstance(ing_struct, list) and ing_struct:
             for item in ing_struct:
                 if not isinstance(item, dict):
@@ -453,10 +455,15 @@ class Tandoor(RecipeExporter):
             payload["keywords"] = keywords
         
         # Add nutrition if available
+        nutrition_data = recipe_data.get("nutrition")
+        logger.info(f"[Tandoor] Recipe nutrition data: {nutrition_data}")
         nutrition = self._build_nutrition(recipe_data)
+        logger.info(f"[Tandoor] Built nutrition: {nutrition}")
         if nutrition:
             payload["nutrition"] = nutrition
             self._log(f"Including nutrition: {nutrition}")
+        else:
+            logger.warning("[Tandoor] No nutrition to include")
         
         return payload
 
@@ -475,6 +482,7 @@ class Tandoor(RecipeExporter):
 
         recipe_name = payload.get('name', 'Unknown')
         logger.info(f"[Upload] Creating recipe in Tandoor: {recipe_name}")
+        logger.info(f"[Tandoor] Payload has nutrition: {'nutrition' in payload}, value: {payload.get('nutrition')}")
         self._log(f"Creating recipe: {recipe_name}")
         self._log(f"POST {create_url}")
 
@@ -493,6 +501,13 @@ class Tandoor(RecipeExporter):
             recipe_id = result.get('id')
             logger.info(f"[Upload] Recipe ID: {recipe_id}")
             self._log(f"Recipe created with ID: {recipe_id}")
+            
+            # Log what Tandoor returned for nutrition
+            returned_nutrition = result.get('nutrition')
+            logger.info(f"[Tandoor] Response nutrition: {returned_nutrition}")
+            if not returned_nutrition:
+                logger.warning("[Tandoor] Nutrition was NOT saved by Tandoor API!")
+            
             return result
         except Exception as e:
             logger.warning(f"[Upload] Could not parse response JSON: {e}")

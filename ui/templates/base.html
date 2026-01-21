@@ -33,6 +33,9 @@
             <a href="{{ url_for('index') }}" class="nav-link {% if request.endpoint == 'index' %}active{% endif %}" title="Home">
                 <i class="fas fa-home"></i>
             </a>
+            <a href="{{ url_for('history') }}" class="nav-link {% if request.endpoint == 'history' %}active{% endif %}" title="History">
+                <i class="fas fa-history"></i>
+            </a>
             <a href="{{ url_for('settings') }}" class="nav-link {% if request.endpoint == 'settings' %}active{% endif %}" title="Settings">
                 <i class="fas fa-cog"></i>
             </a>

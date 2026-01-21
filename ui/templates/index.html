@@ -19,69 +19,91 @@
                 Extract Recipe
             </button>
         </div>
+        <p class="input-hint">You can start multiple extractions - up to 3 will process in parallel</p>
     </div>
     
-    <div class="progress-section" id="progress-section" style="display: none;">
-        <h2><i class="fas fa-tasks"></i> Processing Progress</h2>
-        
-        <div class="progress-bar-container">
-            <div class="progress-bar" id="progress-bar" style="width: 0%"></div>
-            <span class="progress-text" id="progress-text">0%</span>
-        </div>
-        
-        <div class="progress-steps">
-            <div class="progress-step" id="step-info" data-stage="info">
-                <div class="step-icon"><i class="fas fa-info-circle"></i></div>
-                <div class="step-label">Get Info</div>
-                <div class="step-status"></div>
-            </div>
-            <div class="progress-step" id="step-download" data-stage="download">
-                <div class="step-icon"><i class="fas fa-download"></i></div>
-                <div class="step-label">Download</div>
-                <div class="step-status"></div>
-            </div>
-            <div class="progress-step" id="step-transcribe" data-stage="transcribe">
-                <div class="step-icon"><i class="fas fa-microphone"></i></div>
-                <div class="step-label">Transcribe</div>
-                <div class="step-status"></div>
-            </div>
-            <div class="progress-step" id="step-visual" data-stage="visual">
-                <div class="step-icon"><i class="fas fa-eye"></i></div>
-                <div class="step-label">Visual Text</div>
-                <div class="step-status"></div>
-            </div>
-            <div class="progress-step" id="step-image" data-stage="image">
-                <div class="step-icon"><i class="fas fa-image"></i></div>
-                <div class="step-label">Extract Image</div>
-                <div class="step-status"></div>
-            </div>
-            <div class="progress-step" id="step-evaluate" data-stage="evaluate">
-                <div class="step-icon"><i class="fas fa-robot"></i></div>
-                <div class="step-label">AI Recipe</div>
-                <div class="step-status"></div>
-            </div>
-            <div class="progress-step" id="step-upload" data-stage="upload">
-                <div class="step-icon"><i class="fas fa-cloud-upload-alt"></i></div>
-                <div class="step-label">Upload</div>
-                <div class="step-status"></div>
-            </div>
-        </div>
-        
-        <div class="log-container">
-            <h3><i class="fas fa-terminal"></i> Activity Log</h3>
-            <div class="log-output" id="log-output"></div>
+    <!-- Active Jobs Section -->
+    <div class="jobs-section" id="jobs-section" style="display: none;">
+        <h2><i class="fas fa-tasks"></i> Active Jobs <span class="job-count" id="job-count">(0)</span></h2>
+        <div class="jobs-list" id="jobs-list">
+            <!-- Job cards will be dynamically inserted here -->
         </div>
     </div>
     
+    <!-- Completed Results Section (for recent completions) -->
     <div class="result-section" id="result-section" style="display: none;">
-        <h2><i class="fas fa-check-circle"></i> Recipe Created!</h2>
-        <div class="recipe-preview" id="recipe-preview"></div>
-        <button id="new-recipe-btn" class="btn btn-secondary">
-            <i class="fas fa-plus"></i>
-            Process Another Video
-        </button>
+        <h2><i class="fas fa-check-circle"></i> Recently Completed</h2>
+        <div class="completed-recipes" id="completed-recipes"></div>
+        <a href="{{ url_for('history') }}" class="btn btn-secondary">
+            <i class="fas fa-history"></i>
+            View All History
+        </a>
     </div>
 </div>
+
+<!-- Job Card Template (hidden, used for cloning) -->
+<template id="job-card-template">
+    <div class="job-card" data-job-id="">
+        <div class="job-header">
+            <div class="job-info">
+                <h3 class="job-title">Processing video...</h3>
+                <p class="job-url"></p>
+            </div>
+            <button class="btn btn-icon cancel-job-btn" title="Cancel">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        
+        <div class="job-progress">
+            <div class="progress-bar-container">
+                <div class="progress-bar" style="width: 0%"></div>
+                <span class="progress-text">0%</span>
+            </div>
+        </div>
+        
+        <div class="job-steps">
+            <div class="job-step" data-stage="info">
+                <i class="fas fa-info-circle"></i>
+            </div>
+            <div class="job-step" data-stage="download">
+                <i class="fas fa-download"></i>
+            </div>
+            <div class="job-step" data-stage="transcribe">
+                <i class="fas fa-microphone"></i>
+            </div>
+            <div class="job-step" data-stage="visual">
+                <i class="fas fa-eye"></i>
+            </div>
+            <div class="job-step" data-stage="image">
+                <i class="fas fa-image"></i>
+            </div>
+            <div class="job-step" data-stage="evaluate">
+                <i class="fas fa-robot"></i>
+            </div>
+            <div class="job-step" data-stage="upload">
+                <i class="fas fa-cloud-upload-alt"></i>
+            </div>
+        </div>
+        
+        <div class="job-message">
+            <span class="message-text">Waiting to start...</span>
+        </div>
+    </div>
+</template>
+
+<!-- Completed Recipe Card Template -->
+<template id="completed-card-template">
+    <div class="completed-card" data-job-id="">
+        <div class="completed-icon success">
+            <i class="fas fa-check-circle"></i>
+        </div>
+        <div class="completed-info">
+            <h4 class="completed-title">Recipe Name</h4>
+            <p class="completed-message">Uploaded successfully!</p>
+        </div>
+        <a href="#" class="btn btn-secondary view-history-btn">View</a>
+    </div>
+</template>
 {% endblock %}
 
 {% block modals %}
@@ -136,5 +158,5 @@
 {% endblock %}
 
 {% block extra_scripts %}
-<script src="{{ url_for('static', filename='js/main.js') }}?v=2"></script>
+<script src="{{ url_for('static', filename='js/main.js') }}?v=4"></script>
 {% endblock %}

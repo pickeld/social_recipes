@@ -1,0 +1,911 @@
+{% extends "base.html" %}
+
+{% block title %}Recipes - Social Recipes{% endblock %}
+
+{% block content %}
+<div class="main-container">
+    <div class="header">
+        <h1><i class="fas fa-utensils"></i> Recipes</h1>
+        <p>View all your recipes - in progress, completed, and cancelled</p>
+    </div>
+    
+    <div class="history-controls">
+        <div class="search-box">
+            <i class="fas fa-search"></i>
+            <input type="text" id="history-search" placeholder="Search recipes..." class="search-input">
+        </div>
+        <div class="filter-box">
+            <select id="status-filter" class="filter-select">
+                <option value="">All Status</option>
+                <option value="processing">In Progress</option>
+                <option value="pending">Pending</option>
+                <option value="success">Successful</option>
+                <option value="failed">Failed</option>
+                <option value="cancelled">Cancelled</option>
+            </select>
+        </div>
+        <button id="refresh-history" class="btn btn-secondary">
+            <i class="fas fa-sync-alt"></i>
+            Refresh
+        </button>
+    </div>
+    
+    <div class="history-stats" id="history-stats">
+        <span class="stat-item">
+            <i class="fas fa-utensils"></i>
+            <span id="total-recipes">0</span> recipes
+        </span>
+        <span class="stat-item bulk-actions" id="bulk-actions" style="display: none;">
+            <span id="selected-count">0</span> selected
+            <button id="bulk-delete-btn" class="btn btn-danger btn-sm">
+                <i class="fas fa-trash"></i> Delete Selected
+            </button>
+            <button id="select-all-btn" class="btn btn-secondary btn-sm">
+                <i class="fas fa-check-square"></i> Select All
+            </button>
+            <button id="clear-selection-btn" class="btn btn-secondary btn-sm">
+                <i class="fas fa-times"></i> Clear
+            </button>
+        </span>
+    </div>
+    
+    <div class="history-list" id="history-list">
+        <div class="loading-spinner" id="history-loading">
+            <i class="fas fa-spinner fa-spin"></i>
+            <span>Loading recipes...</span>
+        </div>
+    </div>
+    
+    <div class="pagination" id="pagination" style="display: none;">
+        <button id="prev-page" class="btn btn-secondary" disabled>
+            <i class="fas fa-chevron-left"></i> Previous
+        </button>
+        <span id="page-info">Page 1</span>
+        <button id="next-page" class="btn btn-secondary">
+            Next <i class="fas fa-chevron-right"></i>
+        </button>
+    </div>
+</div>
+{% endblock %}
+
+{% block modals %}
+<!-- Recipe Detail Modal -->
+<div class="modal-overlay" id="recipe-modal" style="display: none;">
+    <div class="modal-container">
+        <div class="modal-header">
+            <h2><i class="fas fa-utensils"></i> <span id="modal-recipe-name">Recipe Details</span></h2>
+            <button class="modal-close" id="close-recipe-modal">&times;</button>
+        </div>
+        
+        <div class="modal-body">
+            <div class="recipe-detail-image" id="modal-image-container" style="display: none;">
+                <img id="modal-recipe-image" src="" alt="Recipe Image">
+            </div>
+            
+            <div class="recipe-detail-meta">
+                <p><i class="fas fa-link"></i> <a id="modal-source-url" href="#" target="_blank">Source</a></p>
+                <p><i class="fas fa-clock"></i> <span id="modal-created-at"></span></p>
+                <p><i class="fas fa-cloud-upload-alt"></i> Uploaded to: <span id="modal-target"></span></p>
+            </div>
+            
+            <div class="recipe-detail-content">
+                <p id="modal-description"></p>
+                
+                <div class="recipe-section" id="modal-ingredients-section">
+                    <h4><i class="fas fa-list"></i> Ingredients</h4>
+                    <ul id="modal-ingredients"></ul>
+                </div>
+                
+                <div class="recipe-section" id="modal-instructions-section">
+                    <h4><i class="fas fa-tasks"></i> Instructions</h4>
+                    <ol id="modal-instructions"></ol>
+                </div>
+            </div>
+        </div>
+        
+        <div class="modal-footer">
+            <button id="delete-recipe-btn" class="btn btn-danger">
+                <i class="fas fa-trash"></i> Delete
+            </button>
+            <div class="reupload-dropdown">
+                <button id="reupload-recipe-btn" class="btn btn-primary">
+                    <i class="fas fa-cloud-upload-alt"></i> Re-upload
+                    <i class="fas fa-caret-down"></i>
+                </button>
+                <div class="reupload-menu" id="reupload-menu">
+                    <button class="reupload-option" data-target="tandoor">
+                        <i class="fas fa-utensils"></i> Tandoor
+                    </button>
+                    <button class="reupload-option" data-target="mealie">
+                        <i class="fas fa-book"></i> Mealie
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Confirm Delete Modal -->
+<div class="modal-overlay" id="confirm-delete-modal" style="display: none;">
+    <div class="modal-container modal-small">
+        <div class="modal-header">
+            <h2><i class="fas fa-exclamation-triangle"></i> Confirm Delete</h2>
+        </div>
+        <div class="modal-body">
+            <p>Are you sure you want to delete this recipe from history?</p>
+            <p class="text-muted">This action cannot be undone.</p>
+        </div>
+        <div class="modal-footer">
+            <button id="cancel-delete-btn" class="btn btn-secondary">
+                Cancel
+            </button>
+            <button id="confirm-delete-btn" class="btn btn-danger">
+                <i class="fas fa-trash"></i> Delete
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Confirm Bulk Delete Modal -->
+<div class="modal-overlay" id="confirm-bulk-delete-modal" style="display: none;">
+    <div class="modal-container modal-small">
+        <div class="modal-header">
+            <h2><i class="fas fa-exclamation-triangle"></i> Confirm Bulk Delete</h2>
+        </div>
+        <div class="modal-body">
+            <p>Are you sure you want to delete <strong id="bulk-delete-count">0</strong> selected items?</p>
+            <p class="text-muted">This action cannot be undone.</p>
+        </div>
+        <div class="modal-footer">
+            <button id="cancel-bulk-delete-btn" class="btn btn-secondary">
+                Cancel
+            </button>
+            <button id="confirm-bulk-delete-btn" class="btn btn-danger">
+                <i class="fas fa-trash"></i> Delete All
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // State
+    let currentPage = 0;
+    const pageSize = 20;
+    let totalItems = 0;
+    let currentHistoryId = null;
+    let currentJobId = null;
+    let currentSourceType = null;
+    let selectedItems = new Set(); // Track selected items for bulk delete
+    let allItems = []; // Store all loaded items for selection
+    
+    // DOM Elements
+    const historyList = document.getElementById('history-list');
+    const historyLoading = document.getElementById('history-loading');
+    const historySearch = document.getElementById('history-search');
+    const statusFilter = document.getElementById('status-filter');
+    const refreshBtn = document.getElementById('refresh-history');
+    const pagination = document.getElementById('pagination');
+    const prevPageBtn = document.getElementById('prev-page');
+    const nextPageBtn = document.getElementById('next-page');
+    const pageInfo = document.getElementById('page-info');
+    const totalRecipesSpan = document.getElementById('total-recipes');
+    
+    // Bulk action elements
+    const bulkActions = document.getElementById('bulk-actions');
+    const selectedCountSpan = document.getElementById('selected-count');
+    const bulkDeleteBtn = document.getElementById('bulk-delete-btn');
+    const selectAllBtn = document.getElementById('select-all-btn');
+    const clearSelectionBtn = document.getElementById('clear-selection-btn');
+    
+    // Modals
+    const recipeModal = document.getElementById('recipe-modal');
+    const closeModalBtn = document.getElementById('close-recipe-modal');
+    const deleteBtn = document.getElementById('delete-recipe-btn');
+    const reuploadBtn = document.getElementById('reupload-recipe-btn');
+    const reuploadMenu = document.getElementById('reupload-menu');
+    const confirmDeleteModal = document.getElementById('confirm-delete-modal');
+    const cancelDeleteBtn = document.getElementById('cancel-delete-btn');
+    const confirmDeleteBtn = document.getElementById('confirm-delete-btn');
+    const confirmBulkDeleteModal = document.getElementById('confirm-bulk-delete-modal');
+    const cancelBulkDeleteBtn = document.getElementById('cancel-bulk-delete-btn');
+    const confirmBulkDeleteBtn = document.getElementById('confirm-bulk-delete-btn');
+    const bulkDeleteCountSpan = document.getElementById('bulk-delete-count');
+    
+    // Load history on page load
+    loadHistory();
+    
+    // Set up auto-refresh for in-progress items
+    setInterval(() => {
+        if (hasInProgressItems()) {
+            loadHistory();
+        }
+    }, 5000);
+    
+    // Event listeners
+    historySearch.addEventListener('input', debounce(function() {
+        currentPage = 0;
+        clearSelection();
+        loadHistory();
+    }, 300));
+    
+    statusFilter.addEventListener('change', function() {
+        currentPage = 0;
+        clearSelection();
+        loadHistory();
+    });
+    
+    refreshBtn.addEventListener('click', loadHistory);
+    
+    prevPageBtn.addEventListener('click', function() {
+        if (currentPage > 0) {
+            currentPage--;
+            clearSelection();
+            loadHistory();
+        }
+    });
+    
+    nextPageBtn.addEventListener('click', function() {
+        if ((currentPage + 1) * pageSize < totalItems) {
+            currentPage++;
+            clearSelection();
+            loadHistory();
+        }
+    });
+    
+    closeModalBtn.addEventListener('click', hideRecipeModal);
+    
+    reuploadBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        reuploadMenu.classList.toggle('show');
+    });
+    
+    document.querySelectorAll('.reupload-option').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            const target = this.dataset.target;
+            reuploadRecipe(currentHistoryId, target);
+            reuploadMenu.classList.remove('show');
+        });
+    });
+    
+    deleteBtn.addEventListener('click', function() {
+        confirmDeleteModal.style.display = 'flex';
+    });
+    
+    cancelDeleteBtn.addEventListener('click', function() {
+        confirmDeleteModal.style.display = 'none';
+    });
+    
+    confirmDeleteBtn.addEventListener('click', function() {
+        deleteItem(currentHistoryId, currentJobId, currentSourceType);
+        confirmDeleteModal.style.display = 'none';
+    });
+    
+    // Bulk delete event listeners
+    bulkDeleteBtn.addEventListener('click', function() {
+        bulkDeleteCountSpan.textContent = selectedItems.size;
+        confirmBulkDeleteModal.style.display = 'flex';
+    });
+    
+    selectAllBtn.addEventListener('click', function() {
+        allItems.forEach(item => {
+            const key = getItemKey(item);
+            selectedItems.add(key);
+        });
+        updateSelectionUI();
+    });
+    
+    clearSelectionBtn.addEventListener('click', clearSelection);
+    
+    cancelBulkDeleteBtn.addEventListener('click', function() {
+        confirmBulkDeleteModal.style.display = 'none';
+    });
+    
+    confirmBulkDeleteBtn.addEventListener('click', function() {
+        bulkDeleteItems();
+        confirmBulkDeleteModal.style.display = 'none';
+    });
+    
+    // Close dropdown when clicking outside
+    document.addEventListener('click', function(e) {
+        if (!e.target.closest('.reupload-dropdown')) {
+            reuploadMenu.classList.remove('show');
+        }
+    });
+    
+    // Close modals on overlay click
+    recipeModal.addEventListener('click', function(e) {
+        if (e.target === recipeModal) {
+            hideRecipeModal();
+        }
+    });
+    
+    confirmDeleteModal.addEventListener('click', function(e) {
+        if (e.target === confirmDeleteModal) {
+            confirmDeleteModal.style.display = 'none';
+        }
+    });
+    
+    confirmBulkDeleteModal.addEventListener('click', function(e) {
+        if (e.target === confirmBulkDeleteModal) {
+            confirmBulkDeleteModal.style.display = 'none';
+        }
+    });
+    
+    /**
+     * Check if there are in-progress items
+     */
+    function hasInProgressItems() {
+        return allItems.some(item =>
+            ['pending', 'processing', 'info', 'download', 'transcribe',
+             'visual', 'image', 'evaluate', 'preview', 'upload'].includes(item.status)
+        );
+    }
+    
+    /**
+     * Get unique key for an item
+     */
+    function getItemKey(item) {
+        if (item.source_type === 'history' && item.id) {
+            return `history_${item.id}`;
+        } else if (item.job_id) {
+            return `job_${item.job_id}`;
+        }
+        return null;
+    }
+    
+    /**
+     * Clear selection
+     */
+    function clearSelection() {
+        selectedItems.clear();
+        updateSelectionUI();
+    }
+    
+    /**
+     * Update selection UI
+     */
+    function updateSelectionUI() {
+        selectedCountSpan.textContent = selectedItems.size;
+        bulkActions.style.display = selectedItems.size > 0 ? 'inline-flex' : 'none';
+        
+        // Update checkboxes in the list
+        historyList.querySelectorAll('.history-item').forEach(item => {
+            const checkbox = item.querySelector('.item-checkbox');
+            if (checkbox) {
+                const historyId = item.dataset.historyId;
+                const jobId = item.dataset.jobId;
+                const key = historyId ? `history_${historyId}` : `job_${jobId}`;
+                checkbox.checked = selectedItems.has(key);
+            }
+        });
+    }
+    
+    /**
+     * Load history from API (now using combined endpoint)
+     */
+    async function loadHistory() {
+        historyLoading.style.display = 'flex';
+        
+        const params = new URLSearchParams({
+            limit: pageSize,
+            offset: currentPage * pageSize
+        });
+        
+        if (historySearch.value) {
+            params.append('search', historySearch.value);
+        }
+        
+        if (statusFilter.value) {
+            params.append('status', statusFilter.value);
+        }
+        
+        try {
+            const response = await fetch('/api/recipes?' + params.toString());
+            const data = await response.json();
+            
+            totalItems = data.total;
+            totalRecipesSpan.textContent = totalItems;
+            allItems = data.items;
+            
+            renderHistory(data.items);
+            updatePagination();
+            updateSelectionUI();
+        } catch (error) {
+            console.error('Error loading recipes:', error);
+            historyList.innerHTML = '<div class="error-message">Failed to load recipes</div>';
+        } finally {
+            historyLoading.style.display = 'none';
+        }
+    }
+    
+    /**
+     * Get status display info
+     */
+    function getStatusDisplay(status) {
+        const statusMap = {
+            'success': { icon: 'fa-check-circle', text: 'Uploaded', class: 'success' },
+            'completed': { icon: 'fa-check-circle', text: 'Uploaded', class: 'success' },
+            'failed': { icon: 'fa-times-circle', text: 'Failed', class: 'failed' },
+            'cancelled': { icon: 'fa-ban', text: 'Cancelled', class: 'cancelled' },
+            'pending': { icon: 'fa-clock', text: 'Pending', class: 'pending' },
+            'processing': { icon: 'fa-spinner fa-spin', text: 'Processing', class: 'processing' },
+            'info': { icon: 'fa-info-circle', text: 'Getting info', class: 'processing' },
+            'download': { icon: 'fa-download', text: 'Downloading', class: 'processing' },
+            'transcribe': { icon: 'fa-microphone', text: 'Transcribing', class: 'processing' },
+            'visual': { icon: 'fa-eye', text: 'Extracting text', class: 'processing' },
+            'image': { icon: 'fa-image', text: 'Extracting image', class: 'processing' },
+            'evaluate': { icon: 'fa-brain', text: 'Creating recipe', class: 'processing' },
+            'preview': { icon: 'fa-eye', text: 'Awaiting confirmation', class: 'preview' },
+            'upload': { icon: 'fa-cloud-upload-alt', text: 'Uploading', class: 'processing' }
+        };
+        return statusMap[status] || { icon: 'fa-question-circle', text: status, class: '' };
+    }
+    
+    /**
+     * Render history items
+     */
+    function renderHistory(items) {
+        if (items.length === 0) {
+            historyList.innerHTML = '<div class="empty-state"><i class="fas fa-inbox"></i><p>No recipes found</p></div>';
+            return;
+        }
+        
+        historyList.innerHTML = items.map(item => {
+            const statusInfo = getStatusDisplay(item.status);
+            const isInProgress = ['pending', 'processing', 'info', 'download', 'transcribe',
+                                  'visual', 'image', 'evaluate', 'preview', 'upload'].includes(item.status);
+            const historyId = item.source_type === 'history' ? item.id : null;
+            const jobId = item.job_id;
+            const itemKey = historyId ? `history_${historyId}` : `job_${jobId}`;
+            const isSelected = selectedItems.has(itemKey);
+            
+            return `
+            <div class="history-item ${statusInfo.class}"
+                 data-history-id="${historyId || ''}"
+                 data-job-id="${jobId || ''}"
+                 data-source-type="${item.source_type}"
+                 data-url="${escapeHtml(item.url || '')}">
+                <div class="history-checkbox">
+                    <input type="checkbox" class="item-checkbox" ${isSelected ? 'checked' : ''}>
+                </div>
+                <div class="history-thumbnail">
+                    ${item.thumbnail_data
+                        ? `<img src="data:image/jpeg;base64,${item.thumbnail_data}" alt="Recipe thumbnail">`
+                        : '<div class="no-thumbnail"><i class="fas fa-image"></i></div>'
+                    }
+                </div>
+                <div class="history-info">
+                    <h3 class="history-title">${escapeHtml(item.recipe_name || item.video_title || 'Untitled Recipe')}</h3>
+                    <p class="history-url">${escapeHtml(truncateUrl(item.url))}</p>
+                    <div class="history-meta">
+                        <span class="history-status ${statusInfo.class}">
+                            <i class="fas ${statusInfo.icon}"></i>
+                            ${statusInfo.text}
+                        </span>
+                        ${item.output_target ? `<span class="history-target">to ${item.output_target}</span>` : ''}
+                        ${isInProgress && item.progress ? `<span class="history-progress">${item.progress}%</span>` : ''}
+                        <span class="history-date">${formatDate(item.updated_at || item.created_at)}</span>
+                    </div>
+                    ${item.stage_message && isInProgress ? `<p class="history-stage">${escapeHtml(item.stage_message)}</p>` : ''}
+                    ${item.error_message ? `<p class="history-error">${escapeHtml(item.error_message)}</p>` : ''}
+                </div>
+                <div class="history-actions">
+                    ${item.source_type === 'history' ? `
+                        <button class="btn btn-icon view-recipe-btn" title="View Details">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    ` : ''}
+                    ${item.status === 'success' && item.source_type === 'history' ? `
+                        <button class="btn btn-icon reupload-quick-btn" title="Re-upload">
+                            <i class="fas fa-cloud-upload-alt"></i>
+                        </button>
+                    ` : ''}
+                    ${item.status === 'failed' || item.status === 'cancelled' ? `
+                        <button class="btn btn-icon retry-btn" title="Retry">
+                            <i class="fas fa-redo"></i>
+                        </button>
+                    ` : ''}
+                    ${!isInProgress || item.status === 'cancelled' ? `
+                        <button class="btn btn-icon delete-quick-btn" title="Delete">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    ` : ''}
+                    ${isInProgress && item.status !== 'cancelled' ? `
+                        <button class="btn btn-icon cancel-btn" title="Cancel">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    ` : ''}
+                </div>
+            </div>
+        `}).join('');
+        
+        // Add event listeners to items
+        historyList.querySelectorAll('.history-item').forEach(item => {
+            const historyId = item.dataset.historyId ? parseInt(item.dataset.historyId) : null;
+            const jobId = item.dataset.jobId || null;
+            const sourceType = item.dataset.sourceType;
+            
+            // Checkbox handling
+            const checkbox = item.querySelector('.item-checkbox');
+            checkbox.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const key = historyId ? `history_${historyId}` : `job_${jobId}`;
+                if (checkbox.checked) {
+                    selectedItems.add(key);
+                } else {
+                    selectedItems.delete(key);
+                }
+                updateSelectionUI();
+            });
+            
+            const viewBtn = item.querySelector('.view-recipe-btn');
+            if (viewBtn) {
+                viewBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    if (historyId) showRecipeDetails(historyId);
+                });
+            }
+            
+            const deleteQuickBtn = item.querySelector('.delete-quick-btn');
+            if (deleteQuickBtn) {
+                deleteQuickBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    currentHistoryId = historyId;
+                    currentJobId = jobId;
+                    currentSourceType = sourceType;
+                    confirmDeleteModal.style.display = 'flex';
+                });
+            }
+            
+            const reuploadQuickBtn = item.querySelector('.reupload-quick-btn');
+            if (reuploadQuickBtn) {
+                reuploadQuickBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    if (historyId) showRecipeDetails(historyId);
+                });
+            }
+            
+            const retryBtn = item.querySelector('.retry-btn');
+            if (retryBtn) {
+                retryBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const fullUrl = item.dataset.url;
+                    if (fullUrl) {
+                        retryAnalysis(fullUrl);
+                    }
+                });
+            }
+            
+            const cancelBtn = item.querySelector('.cancel-btn');
+            if (cancelBtn) {
+                cancelBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    if (jobId) cancelJob(jobId);
+                });
+            }
+            
+            // Click on item to view details (only for history items)
+            if (sourceType === 'history' && historyId) {
+                item.addEventListener('click', (e) => {
+                    if (!e.target.closest('.history-checkbox') && !e.target.closest('.history-actions')) {
+                        showRecipeDetails(historyId);
+                    }
+                });
+            }
+        });
+    }
+    
+    /**
+     * Cancel a running job
+     */
+    async function cancelJob(jobId) {
+        try {
+            const response = await fetch(`/api/jobs/${jobId}`, {
+                method: 'DELETE'
+            });
+            const data = await response.json();
+            
+            if (data.error) {
+                showNotification(data.error, 'error');
+                return;
+            }
+            
+            showNotification('Job cancelled', 'success');
+            loadHistory();
+        } catch (error) {
+            console.error('Error cancelling job:', error);
+            showNotification('Failed to cancel job', 'error');
+        }
+    }
+    
+    /**
+     * Show recipe details in modal
+     */
+    async function showRecipeDetails(historyId) {
+        currentHistoryId = historyId;
+        currentJobId = null;
+        currentSourceType = 'history';
+        
+        try {
+            const response = await fetch(`/api/history/${historyId}`);
+            const item = await response.json();
+            
+            if (item.error) {
+                showNotification(item.error, 'error');
+                return;
+            }
+            
+            // Populate modal
+            document.getElementById('modal-recipe-name').textContent =
+                item.recipe_name || item.video_title || 'Recipe Details';
+            
+            const imageContainer = document.getElementById('modal-image-container');
+            const image = document.getElementById('modal-recipe-image');
+            if (item.thumbnail_data) {
+                image.src = 'data:image/jpeg;base64,' + item.thumbnail_data;
+                imageContainer.style.display = 'block';
+            } else {
+                imageContainer.style.display = 'none';
+            }
+            
+            document.getElementById('modal-source-url').href = item.url;
+            document.getElementById('modal-source-url').textContent = truncateUrl(item.url);
+            document.getElementById('modal-created-at').textContent = formatDate(item.created_at);
+            document.getElementById('modal-target').textContent = item.output_target || 'N/A';
+            
+            const recipe = item.recipe_data || {};
+            document.getElementById('modal-description').textContent = recipe.description || '';
+            
+            const ingredientsList = document.getElementById('modal-ingredients');
+            const ingredientsSection = document.getElementById('modal-ingredients-section');
+            if (recipe.recipeIngredient && recipe.recipeIngredient.length > 0) {
+                ingredientsList.innerHTML = recipe.recipeIngredient.map(ing =>
+                    `<li>${escapeHtml(ing)}</li>`
+                ).join('');
+                ingredientsSection.style.display = 'block';
+            } else {
+                ingredientsSection.style.display = 'none';
+            }
+            
+            const instructionsList = document.getElementById('modal-instructions');
+            const instructionsSection = document.getElementById('modal-instructions-section');
+            if (recipe.recipeInstructions && recipe.recipeInstructions.length > 0) {
+                instructionsList.innerHTML = recipe.recipeInstructions.map(inst => {
+                    const text = typeof inst === 'object' ? inst.text : inst;
+                    return `<li>${escapeHtml(text)}</li>`;
+                }).join('');
+                instructionsSection.style.display = 'block';
+            } else {
+                instructionsSection.style.display = 'none';
+            }
+            
+            // Show/hide reupload button based on status
+            if (item.status === 'success' && item.recipe_data) {
+                reuploadBtn.style.display = 'inline-flex';
+            } else {
+                reuploadBtn.style.display = 'none';
+            }
+            
+            recipeModal.style.display = 'flex';
+            document.body.style.overflow = 'hidden';
+            
+        } catch (error) {
+            console.error('Error loading recipe details:', error);
+            showNotification('Failed to load recipe details', 'error');
+        }
+    }
+    
+    /**
+     * Hide recipe modal
+     */
+    function hideRecipeModal() {
+        recipeModal.style.display = 'none';
+        document.body.style.overflow = '';
+        currentHistoryId = null;
+        currentJobId = null;
+        currentSourceType = null;
+    }
+    
+    /**
+     * Delete an item (history entry or job)
+     */
+    async function deleteItem(historyId, jobId, sourceType) {
+        try {
+            let response;
+            if (sourceType === 'history' && historyId) {
+                response = await fetch(`/api/history/${historyId}`, {
+                    method: 'DELETE'
+                });
+            } else if (jobId) {
+                response = await fetch(`/api/jobs/${jobId}/delete`, {
+                    method: 'DELETE'
+                });
+            } else {
+                showNotification('Invalid item', 'error');
+                return;
+            }
+            
+            const data = await response.json();
+            
+            if (data.error) {
+                showNotification(data.error, 'error');
+                return;
+            }
+            
+            showNotification('Item deleted successfully', 'success');
+            hideRecipeModal();
+            loadHistory();
+        } catch (error) {
+            console.error('Error deleting item:', error);
+            showNotification('Failed to delete item', 'error');
+        }
+    }
+    
+    /**
+     * Bulk delete items
+     */
+    async function bulkDeleteItems() {
+        const historyIds = [];
+        const jobIds = [];
+        
+        selectedItems.forEach(key => {
+            if (key.startsWith('history_')) {
+                historyIds.push(parseInt(key.replace('history_', '')));
+            } else if (key.startsWith('job_')) {
+                jobIds.push(key.replace('job_', ''));
+            }
+        });
+        
+        try {
+            const response = await fetch('/api/history/bulk-delete', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    history_ids: historyIds,
+                    job_ids: jobIds
+                })
+            });
+            const data = await response.json();
+            
+            if (data.error) {
+                showNotification(data.error, 'error');
+                return;
+            }
+            
+            showNotification(`Deleted ${data.deleted_count} items`, 'success');
+            clearSelection();
+            loadHistory();
+        } catch (error) {
+            console.error('Error bulk deleting items:', error);
+            showNotification('Failed to delete items', 'error');
+        }
+    }
+    
+    /**
+     * Re-upload a recipe to target
+     */
+    async function reuploadRecipe(historyId, target) {
+        showNotification(`Re-uploading to ${target}...`, 'info');
+        
+        try {
+            const response = await fetch(`/api/history/${historyId}/reupload`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ target: target })
+            });
+            const data = await response.json();
+            
+            if (data.error) {
+                showNotification(data.error, 'error');
+                return;
+            }
+            
+            showNotification(`Recipe re-uploaded to ${target} successfully!`, 'success');
+        } catch (error) {
+            console.error('Error re-uploading recipe:', error);
+            showNotification('Failed to re-upload recipe', 'error');
+        }
+    }
+    
+    /**
+     * Retry failed analysis
+     */
+    function retryAnalysis(url) {
+        // Redirect to home page with the URL
+        window.location.href = '/?url=' + encodeURIComponent(url);
+    }
+    
+    /**
+     * Update pagination controls
+     */
+    function updatePagination() {
+        const totalPages = Math.ceil(totalItems / pageSize);
+        
+        if (totalPages <= 1) {
+            pagination.style.display = 'none';
+            return;
+        }
+        
+        pagination.style.display = 'flex';
+        pageInfo.textContent = `Page ${currentPage + 1} of ${totalPages}`;
+        prevPageBtn.disabled = currentPage === 0;
+        nextPageBtn.disabled = currentPage >= totalPages - 1;
+    }
+    
+    /**
+     * Utility functions
+     */
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    
+    function truncateUrl(url) {
+        if (!url) return '';
+        try {
+            const parsed = new URL(url);
+            return parsed.hostname + parsed.pathname.slice(0, 30) + (parsed.pathname.length > 30 ? '...' : '');
+        } catch {
+            return url.slice(0, 50) + (url.length > 50 ? '...' : '');
+        }
+    }
+    
+    function formatDate(dateStr) {
+        if (!dateStr) return '';
+        const date = new Date(dateStr);
+        const now = new Date();
+        const diff = now - date;
+        
+        if (diff < 60000) return 'Just now';
+        if (diff < 3600000) return Math.floor(diff / 60000) + ' minutes ago';
+        if (diff < 86400000) return Math.floor(diff / 3600000) + ' hours ago';
+        if (diff < 604800000) return Math.floor(diff / 86400000) + ' days ago';
+        
+        return date.toLocaleDateString();
+    }
+    
+    function debounce(func, wait) {
+        let timeout;
+        return function(...args) {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => func.apply(this, args), wait);
+        };
+    }
+    
+    function showNotification(message, type) {
+        const flashContainer = document.querySelector('.flash-messages') || createFlashContainer();
+        
+        const flashMessage = document.createElement('div');
+        flashMessage.className = 'flash-message flash-' + type;
+        flashMessage.innerHTML = `
+            ${escapeHtml(message)}
+            <button class="flash-close" onclick="this.parentElement.remove()">&times;</button>
+        `;
+        
+        flashContainer.appendChild(flashMessage);
+        
+        setTimeout(() => {
+            if (flashMessage.parentElement) {
+                flashMessage.remove();
+            }
+        }, 5000);
+    }
+    
+    function createFlashContainer() {
+        const container = document.createElement('div');
+        container.className = 'flash-messages';
+        document.body.appendChild(container);
+        return container;
+    }
+});
+</script>
+{% endblock %}

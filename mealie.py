@@ -27,6 +27,86 @@ class Mealie(RecipeExporter):
         """Get the URL for image upload endpoint."""
         return f"{self.base_url}/api/recipes/{recipe_id}/image"
 
+    def _get_all_units(self, headers: dict) -> dict[str, dict]:
+        """Fetch all units from Mealie and return a dict keyed by lowercase name."""
+        units_url = f"{self.base_url}/api/units?page=1&perPage=-1"
+        try:
+            resp = self._session.get(units_url, headers=headers, timeout=30)
+            if resp.status_code == 200:
+                data = resp.json()
+                items = data.get("items", []) if isinstance(data, dict) else data
+                return {u.get("name", "").lower(): u for u in items if u.get("name")}
+        except Exception as e:
+            logger.warning(f"[Mealie] Failed to fetch units: {e}")
+        return {}
+
+    def _get_all_foods(self, headers: dict) -> dict[str, dict]:
+        """Fetch all foods from Mealie and return a dict keyed by lowercase name."""
+        foods_url = f"{self.base_url}/api/foods?page=1&perPage=-1"
+        try:
+            resp = self._session.get(foods_url, headers=headers, timeout=30)
+            if resp.status_code == 200:
+                data = resp.json()
+                items = data.get("items", []) if isinstance(data, dict) else data
+                return {f.get("name", "").lower(): f for f in items if f.get("name")}
+        except Exception as e:
+            logger.warning(f"[Mealie] Failed to fetch foods: {e}")
+        return {}
+
+    def _create_unit(self, name: str, headers: dict) -> dict | None:
+        """Create a new unit in Mealie and return the created object with ID."""
+        units_url = f"{self.base_url}/api/units"
+        try:
+            resp = self._session.post(units_url, json={"name": name}, headers=headers, timeout=30)
+            if resp.status_code in (200, 201):
+                return resp.json()
+            else:
+                logger.warning(f"[Mealie] Failed to create unit '{name}': {resp.status_code}")
+        except Exception as e:
+            logger.warning(f"[Mealie] Failed to create unit '{name}': {e}")
+        return None
+
+    def _create_food(self, name: str, headers: dict) -> dict | None:
+        """Create a new food in Mealie and return the created object with ID."""
+        foods_url = f"{self.base_url}/api/foods"
+        try:
+            resp = self._session.post(foods_url, json={"name": name}, headers=headers, timeout=30)
+            if resp.status_code in (200, 201):
+                return resp.json()
+            else:
+                logger.warning(f"[Mealie] Failed to create food '{name}': {resp.status_code}")
+        except Exception as e:
+            logger.warning(f"[Mealie] Failed to create food '{name}': {e}")
+        return None
+
+    def _get_or_create_unit(self, name: str, units: dict[str, dict], headers: dict) -> dict | None:
+        """Get existing unit or create new one. Returns unit object with ID or None."""
+        if not name:
+            return None
+        name_lower = name.lower()
+        if name_lower in units:
+            return units[name_lower]
+        # Create new unit
+        new_unit = self._create_unit(name, headers)
+        if new_unit:
+            units[name_lower] = new_unit  # Update the dict for subsequent lookups
+            return new_unit
+        return None
+
+    def _get_or_create_food(self, name: str, foods: dict[str, dict], headers: dict) -> dict | None:
+        """Get existing food or create new one. Returns food object with ID or None."""
+        if not name:
+            return None
+        name_lower = name.lower()
+        if name_lower in foods:
+            return foods[name_lower]
+        # Create new food
+        new_food = self._create_food(name, headers)
+        if new_food:
+            foods[name_lower] = new_food  # Update the dict for subsequent lookups
+            return new_food
+        return None
+
     def _build_nutrition(self, recipe_data: dict) -> dict | None:
         """
         Build Mealie nutrition object from Schema.org NutritionInformation.
@@ -67,17 +147,26 @@ class Mealie(RecipeExporter):
         
         return mealie_nutrition if has_any else None
 
-    def _build_update_payload(self, original_recipe_schema: dict) -> dict:
+    def _build_update_payload(self, original_recipe_schema: dict, headers: dict,
+                              units: dict[str, dict], foods: dict[str, dict]) -> dict:
         """
         Build payload for PATCH/PUT to /api/recipes/{id|slug} using Mealie internal field names.
         
-        Mealie RecipeIngredient schema:
-        - quantity: float (optional)
-        - unit: object with 'name' field or null (Mealie auto-creates units)
-        - food: object with 'name' field or null (Mealie auto-creates foods)
-        - note: string (optional)
-        - display: string (the full ingredient text for display)
-        - originalText: string (optional, original parsed text)
+        Mealie RecipeIngredient schema (from GitHub source):
+        - title: string | None (optional header)
+        - note: string | None (optional notes)
+        - unit: IngredientUnit | None (object with 'id' and 'name' - MUST have id for PUT)
+        - food: IngredientFood | None (object with 'id' and 'name' - MUST have id for PUT)
+        - disableAmount: bool (default True)
+        - quantity: float | None
+        - originalText: string | None (original parsed text)
+        - referenceId: UUID | None
+        
+        Args:
+            original_recipe_schema: The recipe data in Schema.org format
+            headers: HTTP headers for API calls
+            units: Dict of existing units keyed by lowercase name
+            foods: Dict of existing foods keyed by lowercase name
         """
         ry = original_recipe_schema.get("recipeYield") or ""
         ry_qty = extract_servings(original_recipe_schema)
@@ -87,17 +176,21 @@ class Mealie(RecipeExporter):
             "recipeIngredientStructured") or []
         ingredients = []
         
+        logger.info(f"[Mealie] Building ingredients: structured={len(ing_struct) if ing_struct else 0}")
+        
         # If no structured ingredients, fall back to simple ingredient strings
         if not ing_struct:
             simple_ingredients = original_recipe_schema.get("recipeIngredient") or []
             for line in simple_ingredients:
                 if isinstance(line, str) and line.strip():
+                    # For simple text ingredients, put the text in note field
                     ingredients.append({
-                        "quantity": None,
+                        "title": None,
+                        "note": line.strip(),
                         "unit": None,
                         "food": None,
-                        "note": line.strip(),
-                        "display": line.strip(),
+                        "disableAmount": True,
+                        "quantity": None,
                         "originalText": line.strip(),
                     })
         else:
@@ -113,31 +206,32 @@ class Mealie(RecipeExporter):
                 if isinstance(modifiers, str):
                     modifiers = [m.strip()
                                  for m in modifiers.split(",") if m.strip()]
-                notes = (item.get("notes") or "").strip()
+                notes_from_item = (item.get("notes") or "").strip()
+                
+                # Build note from modifiers and notes
                 note_parts = []
-                if notes:
-                    note_parts.append(notes)
+                if notes_from_item:
+                    note_parts.append(notes_from_item)
                 if modifiers:
                     note_parts.append(" ".join(modifiers))
-                note = " | ".join(note_parts) or None
-                display = raw or " ".join(
-                    filter(None, [qty_s, unit_name, food_name])).strip()
+                note = " | ".join(note_parts) if note_parts else None
                 
-                # Mealie expects unit and food as objects with 'name' field, not just strings
-                # Mealie will auto-create units/foods when given objects with 'name'
-                unit_obj = {"name": unit_name} if unit_name else None
-                food_obj = {"name": food_name} if food_name else None
+                # Get or create unit and food with proper IDs
+                unit_obj = self._get_or_create_unit(unit_name, units, headers)
+                food_obj = self._get_or_create_food(food_name, foods, headers)
                 
-                ingredients.append(
-                    {
-                        "quantity": qty_num,
-                        "unit": unit_obj,
-                        "food": food_obj,
-                        "note": note,
-                        "display": display,
-                        "originalText": raw or None,
-                    }
-                )
+                # Build ingredient with proper unit/food objects (with IDs)
+                ingredient = {
+                    "title": None,
+                    "note": note,
+                    "unit": unit_obj,  # Now has proper ID from Mealie
+                    "food": food_obj,  # Now has proper ID from Mealie
+                    "disableAmount": qty_num is None or qty_num == 0,
+                    "quantity": qty_num,
+                    "originalText": raw if raw else None,
+                }
+                
+                ingredients.append(ingredient)
 
         # Instructions
         instructions_src = original_recipe_schema.get(
@@ -157,6 +251,13 @@ class Mealie(RecipeExporter):
                     "ingredientReferences": []
                 })
 
+        # Get source URL from recipe data
+        source_url = (
+            original_recipe_schema.get("url") or
+            original_recipe_schema.get("source_url") or
+            ""
+        )
+
         update_payload = {
             "name": original_recipe_schema.get("name") or original_recipe_schema.get("title") or "Untitled",
             "description": original_recipe_schema.get("description") or "",
@@ -165,13 +266,23 @@ class Mealie(RecipeExporter):
             "recipeServings": ry_qty,
             "recipeIngredient": ingredients,
             "recipeInstructions": instructions,
+            "orgURL": source_url,  # Mealie uses orgURL for the source URL
         }
         
         # Add nutrition if available
+        nutrition_data = original_recipe_schema.get("nutrition")
+        logger.info(f"[Mealie] Recipe nutrition data: {nutrition_data}")
         nutrition = self._build_nutrition(original_recipe_schema)
+        logger.info(f"[Mealie] Built nutrition: {nutrition}")
         if nutrition:
             update_payload["nutrition"] = nutrition
+            # Enable nutrition display in Mealie settings
+            update_payload["settings"] = update_payload.get("settings", {})
+            if isinstance(update_payload["settings"], dict):
+                update_payload["settings"]["showNutrition"] = True
             self._log(f"Including nutrition: {nutrition}")
+        else:
+            logger.warning("[Mealie] No nutrition to include")
         
         return update_payload
 
@@ -249,39 +360,66 @@ class Mealie(RecipeExporter):
             self._log("Unable to fetch current dict; returning primitive response.")
             return {"id_or_slug": ident, "raw": created}
 
-        ingr_list = current.get("recipeIngredient") or []
-        placeholder = (
-            isinstance(ingr_list, list)
-            and len(ingr_list) == 1
-            and isinstance(ingr_list[0], dict)
-            and (ingr_list[0].get("note") == "1 Cup Flour" or ingr_list[0].get("display") == "1 Cup Flour")
-        )
-        if not placeholder and ingr_list:
-            self._log(f"Server already populated ingredients ({len(ingr_list)}). Skipping update.")
-            return current
+        # Always update with our structured data - Mealie's initial creation doesn't include our ingredients
+        # The old logic would skip update if server had any ingredients, which caused data loss
+
+        # Fetch existing units and foods from Mealie for proper ID resolution
+        logger.info("[Mealie] Fetching existing units and foods...")
+        units = self._get_all_units(headers)
+        foods = self._get_all_foods(headers)
+        logger.info(f"[Mealie] Found {len(units)} units and {len(foods)} foods in Mealie")
 
         # Build update payload - merge with existing recipe to ensure all required fields present
-        update_fields = self._build_update_payload(recipe_data)
+        update_fields = self._build_update_payload(recipe_data, headers, units, foods)
         self._log(f"Update ingredients={len(update_fields['recipeIngredient'])} instructions={len(update_fields['recipeInstructions'])}")
         
         # Merge update fields into the existing recipe (Mealie PUT requires complete object)
         update_payload = current.copy()
+        
+        # Log what's in current nutrition before merge
+        logger.info(f"[Mealie] Current recipe nutrition before merge: {current.get('nutrition')}")
+        
         update_payload.update(update_fields)
+        
+        # Log what's in update_payload nutrition after merge
+        logger.info(f"[Mealie] Update payload nutrition after merge: {update_payload.get('nutrition')}")
 
         # Use PUT (Mealie's PATCH can be temperamental)
         put_url = f"{self.base_url}/api/recipes/{ident}"
         self._log(f"PUT {put_url}")
-        put_resp = self._session.put(put_url, json=update_payload, headers=headers)
-        self._log(f"PUT -> {put_resp.status_code}")
-        
-        if put_resp.status_code >= 400:
-            self._log(f"Update error body: {put_resp.text[:1000]}")
-            put_resp.raise_for_status()
+        logger.info(f"[Mealie] Sending PUT to {put_url} with {len(update_payload.get('recipeIngredient', []))} ingredients")
+        logger.info(f"[Mealie] Payload has nutrition: {'nutrition' in update_payload}, value: {update_payload.get('nutrition')}")
+        if update_payload.get('recipeIngredient'):
+            logger.info(f"[Mealie] First ingredient in payload: {update_payload['recipeIngredient'][0]}")
         
         try:
-            return put_resp.json()
-        except Exception:
-            return {"id": ident, "update_raw": put_resp.text}
+            put_resp = self._session.put(put_url, json=update_payload, headers=headers, timeout=60)
+            self._log(f"PUT -> {put_resp.status_code}")
+            logger.info(f"[Mealie] PUT response status: {put_resp.status_code}")
+            
+            if put_resp.status_code >= 400:
+                self._log(f"Update error body: {put_resp.text[:1000]}")
+                logger.error(f"[Mealie] PUT failed: {put_resp.text[:500]}")
+                put_resp.raise_for_status()
+            
+            try:
+                result = put_resp.json()
+                logger.info(f"[Mealie] PUT succeeded, recipe updated")
+                
+                # Log what Mealie returned for nutrition and ingredients
+                returned_nutrition = result.get('nutrition')
+                returned_ingredients = result.get('recipeIngredient', [])
+                logger.info(f"[Mealie] Response nutrition: {returned_nutrition}")
+                logger.info(f"[Mealie] Response has {len(returned_ingredients)} ingredients")
+                if returned_ingredients:
+                    logger.info(f"[Mealie] First ingredient: {returned_ingredients[0] if returned_ingredients else 'None'}")
+                
+                return result
+            except Exception:
+                return {"id": ident, "update_raw": put_resp.text}
+        except Exception as e:
+            logger.error(f"[Mealie] PUT request failed with exception: {e}")
+            raise
 
     def upload_image(self, recipe_id: str | int, image_path: str) -> bool:
         """
