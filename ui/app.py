@@ -21,6 +21,8 @@ from database import (
     init_db, load_config, save_config,
     verify_user, update_password, hash_password,
     get_history, get_history_entry, get_history_count, delete_history_entry,
+    delete_history_entries_bulk, delete_job_entry, delete_jobs_bulk,
+    get_combined_history_and_jobs, get_combined_history_and_jobs_count,
     get_job, get_active_jobs
 )
 from job_manager import init_job_manager, get_job_manager
@@ -378,6 +380,74 @@ def delete_history_item(history_id):
     if result:
         return jsonify({'status': 'deleted', 'id': history_id})
     return jsonify({'error': 'History entry not found'}), 404
+
+
+@app.route('/api/history/bulk-delete', methods=['POST'])
+@api_login_required
+def bulk_delete_history():
+    """Delete multiple history entries and/or job entries at once."""
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+    
+    history_ids = data.get('history_ids', [])
+    job_ids = data.get('job_ids', [])
+    
+    if not history_ids and not job_ids:
+        return jsonify({'error': 'No items to delete'}), 400
+    
+    deleted_history = 0
+    deleted_jobs = 0
+    
+    if history_ids:
+        deleted_history = delete_history_entries_bulk(history_ids)
+    
+    if job_ids:
+        deleted_jobs = delete_jobs_bulk(job_ids)
+    
+    total_deleted = deleted_history + deleted_jobs
+    return jsonify({
+        'status': 'deleted',
+        'deleted_count': total_deleted,
+        'deleted_history': deleted_history,
+        'deleted_jobs': deleted_jobs
+    })
+
+
+@app.route('/api/recipes', methods=['GET'])
+@api_login_required
+def get_recipes_api():
+    """Get combined recipe history and active jobs with pagination and filtering.
+    
+    This endpoint provides a unified view of:
+    - Completed/failed recipes from history
+    - In-progress jobs
+    - Cancelled jobs
+    """
+    limit = request.args.get('limit', 50, type=int)
+    offset = request.args.get('offset', 0, type=int)
+    status = request.args.get('status')
+    search = request.args.get('search')
+    
+    items = get_combined_history_and_jobs(limit=limit, offset=offset, status_filter=status, search=search)
+    total = get_combined_history_and_jobs_count(status_filter=status, search=search)
+    
+    return jsonify({
+        'items': items,
+        'total': total,
+        'limit': limit,
+        'offset': offset
+    })
+
+
+@app.route('/api/jobs/<job_id>/delete', methods=['DELETE'])
+@api_login_required
+def delete_job_api(job_id):
+    """Delete a job entry (for cancelled/failed jobs that aren't in history)."""
+    result = delete_job_entry(job_id)
+    if result:
+        return jsonify({'status': 'deleted', 'job_id': job_id})
+    return jsonify({'error': 'Job not found'}), 404
 
 
 @app.route('/api/history/<int:history_id>/reupload', methods=['POST'])

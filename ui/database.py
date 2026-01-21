@@ -414,6 +414,236 @@ def delete_history_entry(history_id: int) -> bool:
         return cursor.rowcount > 0
 
 
+def delete_history_entries_bulk(history_ids: List[int]) -> int:
+    """Delete multiple history entries. Returns count of deleted entries."""
+    if not history_ids:
+        return 0
+    with get_db() as conn:
+        cursor = conn.cursor()
+        placeholders = ','.join(['?' for _ in history_ids])
+        cursor.execute(f'DELETE FROM recipe_history WHERE id IN ({placeholders})', history_ids)
+        conn.commit()
+        return cursor.rowcount
+
+
+def get_combined_history_and_jobs(limit: int = 50, offset: int = 0,
+                                   status_filter: Optional[str] = None,
+                                   search: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Get combined view of recipe history and active/cancelled jobs.
+    
+    This provides a unified view showing:
+    - Completed/failed recipes from recipe_history
+    - In-progress jobs from recipe_jobs
+    - Cancelled jobs from recipe_jobs
+    """
+    with get_db() as conn:
+        cursor = conn.cursor()
+        
+        # Build query for recipe_history
+        history_query = '''
+            SELECT
+                'history' as source_type,
+                id,
+                job_id,
+                url,
+                video_title,
+                recipe_name,
+                recipe_data,
+                thumbnail_path,
+                thumbnail_data,
+                status,
+                error_message,
+                output_target,
+                created_at,
+                NULL as progress,
+                NULL as current_stage,
+                NULL as stage_message,
+                created_at as updated_at
+            FROM recipe_history
+            WHERE 1=1
+        '''
+        history_params = []
+        
+        # Build query for recipe_jobs (only non-completed jobs that don't have history entries)
+        jobs_query = '''
+            SELECT
+                'job' as source_type,
+                NULL as id,
+                rj.id as job_id,
+                rj.url,
+                rj.video_title,
+                NULL as recipe_name,
+                NULL as recipe_data,
+                NULL as thumbnail_path,
+                NULL as thumbnail_data,
+                rj.status,
+                rj.error_message,
+                NULL as output_target,
+                rj.created_at,
+                rj.progress,
+                rj.current_stage,
+                rj.stage_message,
+                rj.updated_at
+            FROM recipe_jobs rj
+            LEFT JOIN recipe_history rh ON rj.id = rh.job_id
+            WHERE rh.id IS NULL
+        '''
+        jobs_params = []
+        
+        # Apply status filter
+        if status_filter:
+            if status_filter == 'success':
+                history_query += ' AND status = ?'
+                history_params.append('success')
+                jobs_query += ' AND 1=0'  # No jobs can be "success" without history
+            elif status_filter == 'failed':
+                history_query += ' AND status = ?'
+                history_params.append('failed')
+                jobs_query += ' AND rj.status = ?'
+                jobs_params.append('failed')
+            elif status_filter == 'cancelled':
+                history_query += ' AND 1=0'  # No history entries for cancelled
+                jobs_query += ' AND rj.status = ?'
+                jobs_params.append('cancelled')
+            elif status_filter == 'pending':
+                history_query += ' AND 1=0'  # No history entries for pending
+                jobs_query += ' AND rj.status = ?'
+                jobs_params.append('pending')
+            elif status_filter == 'processing':
+                history_query += ' AND 1=0'  # No history entries for processing
+                jobs_query += ' AND rj.status NOT IN (?, ?, ?, ?)'
+                jobs_params.extend(['completed', 'failed', 'cancelled', 'pending'])
+        
+        # Apply search filter
+        if search:
+            search_pattern = f'%{search}%'
+            history_query += ' AND (recipe_name LIKE ? OR video_title LIKE ? OR url LIKE ?)'
+            history_params.extend([search_pattern, search_pattern, search_pattern])
+            jobs_query += ' AND (rj.video_title LIKE ? OR rj.url LIKE ?)'
+            jobs_params.extend([search_pattern, search_pattern])
+        
+        # Combine queries with UNION ALL
+        combined_query = f'''
+            SELECT * FROM (
+                {history_query}
+                UNION ALL
+                {jobs_query}
+            ) combined
+            ORDER BY
+                CASE
+                    WHEN status IN ('pending', 'processing', 'info', 'download', 'transcribe',
+                                    'visual', 'image', 'evaluate', 'preview', 'upload') THEN 0
+                    WHEN status = 'cancelled' THEN 1
+                    ELSE 2
+                END,
+                updated_at DESC
+            LIMIT ? OFFSET ?
+        '''
+        
+        all_params = history_params + jobs_params + [limit, offset]
+        cursor.execute(combined_query, all_params)
+        
+        results = []
+        for row in cursor.fetchall():
+            item = dict(row)
+            # Parse recipe_data JSON if present
+            if item.get('recipe_data'):
+                try:
+                    item['recipe_data'] = json.loads(item['recipe_data'])
+                except json.JSONDecodeError:
+                    pass
+            results.append(item)
+        return results
+
+
+def get_combined_history_and_jobs_count(status_filter: Optional[str] = None,
+                                         search: Optional[str] = None) -> int:
+    """Get total count of combined history and jobs with optional filtering."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        
+        # Count from recipe_history
+        history_query = 'SELECT COUNT(*) FROM recipe_history WHERE 1=1'
+        history_params = []
+        
+        # Count from recipe_jobs (only non-completed jobs that don't have history entries)
+        jobs_query = '''
+            SELECT COUNT(*) FROM recipe_jobs rj
+            LEFT JOIN recipe_history rh ON rj.id = rh.job_id
+            WHERE rh.id IS NULL
+        '''
+        jobs_params = []
+        
+        # Apply status filter
+        if status_filter:
+            if status_filter == 'success':
+                history_query += ' AND status = ?'
+                history_params.append('success')
+                jobs_query = 'SELECT 0'  # No jobs can be "success" without history
+                jobs_params = []
+            elif status_filter == 'failed':
+                history_query += ' AND status = ?'
+                history_params.append('failed')
+                jobs_query += ' AND rj.status = ?'
+                jobs_params.append('failed')
+            elif status_filter == 'cancelled':
+                history_query = 'SELECT 0'  # No history entries for cancelled
+                history_params = []
+                jobs_query += ' AND rj.status = ?'
+                jobs_params.append('cancelled')
+            elif status_filter == 'pending':
+                history_query = 'SELECT 0'  # No history entries for pending
+                history_params = []
+                jobs_query += ' AND rj.status = ?'
+                jobs_params.append('pending')
+            elif status_filter == 'processing':
+                history_query = 'SELECT 0'  # No history entries for processing
+                history_params = []
+                jobs_query += ' AND rj.status NOT IN (?, ?, ?, ?)'
+                jobs_params.extend(['completed', 'failed', 'cancelled', 'pending'])
+        
+        # Apply search filter
+        if search:
+            search_pattern = f'%{search}%'
+            if 'SELECT 0' not in history_query:
+                history_query += ' AND (recipe_name LIKE ? OR video_title LIKE ? OR url LIKE ?)'
+                history_params.extend([search_pattern, search_pattern, search_pattern])
+            if 'SELECT 0' not in jobs_query:
+                jobs_query += ' AND (rj.video_title LIKE ? OR rj.url LIKE ?)'
+                jobs_params.extend([search_pattern, search_pattern])
+        
+        # Execute history count
+        cursor.execute(history_query, history_params)
+        history_count = cursor.fetchone()[0]
+        
+        # Execute jobs count
+        cursor.execute(jobs_query, jobs_params)
+        jobs_count = cursor.fetchone()[0]
+        
+        return history_count + jobs_count
+
+
+def delete_job_entry(job_id: str) -> bool:
+    """Delete a job entry."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM recipe_jobs WHERE id = ?', (job_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def delete_jobs_bulk(job_ids: List[str]) -> int:
+    """Delete multiple job entries. Returns count of deleted entries."""
+    if not job_ids:
+        return 0
+    with get_db() as conn:
+        cursor = conn.cursor()
+        placeholders = ','.join(['?' for _ in job_ids])
+        cursor.execute(f'DELETE FROM recipe_jobs WHERE id IN ({placeholders})', job_ids)
+        conn.commit()
+        return cursor.rowcount
+
+
 def cleanup_old_jobs(hours: int = 24) -> int:
     """Clean up jobs older than specified hours that are completed/failed/cancelled."""
     with get_db() as conn:
