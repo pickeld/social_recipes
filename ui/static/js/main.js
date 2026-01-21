@@ -4,6 +4,9 @@
  */
 
 document.addEventListener('DOMContentLoaded', function() {
+    // DOM Elements - declared early so they're available for checkForSharedContent
+    const videoUrlInput = document.getElementById('video-url');
+    
     // Check for shared URL from Web Share Target API
     checkForSharedContent();
     
@@ -12,9 +15,6 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Job state management
     const activeJobs = new Map();  // job_id -> job data
-    
-    // DOM Elements
-    const videoUrlInput = document.getElementById('video-url');
     const processBtn = document.getElementById('process-btn');
     const jobsSection = document.getElementById('jobs-section');
     const jobsList = document.getElementById('jobs-list');
