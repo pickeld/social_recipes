@@ -501,6 +501,13 @@ class Tandoor(RecipeExporter):
             recipe_id = result.get('id')
             logger.info(f"[Upload] Recipe ID: {recipe_id}")
             self._log(f"Recipe created with ID: {recipe_id}")
+            
+            # Log what Tandoor returned for nutrition
+            returned_nutrition = result.get('nutrition')
+            logger.info(f"[Tandoor] Response nutrition: {returned_nutrition}")
+            if not returned_nutrition:
+                logger.warning("[Tandoor] Nutrition was NOT saved by Tandoor API!")
+            
             return result
         except Exception as e:
             logger.warning(f"[Upload] Could not parse response JSON: {e}")

@@ -279,6 +279,9 @@ class Mealie(RecipeExporter):
         put_url = f"{self.base_url}/api/recipes/{ident}"
         self._log(f"PUT {put_url}")
         logger.info(f"[Mealie] Sending PUT to {put_url} with {len(update_payload.get('recipeIngredient', []))} ingredients")
+        logger.info(f"[Mealie] Payload has nutrition: {'nutrition' in update_payload}, value: {update_payload.get('nutrition')}")
+        if update_payload.get('recipeIngredient'):
+            logger.info(f"[Mealie] First ingredient in payload: {update_payload['recipeIngredient'][0]}")
         
         try:
             put_resp = self._session.put(put_url, json=update_payload, headers=headers, timeout=60)
@@ -293,6 +296,15 @@ class Mealie(RecipeExporter):
             try:
                 result = put_resp.json()
                 logger.info(f"[Mealie] PUT succeeded, recipe updated")
+                
+                # Log what Mealie returned for nutrition and ingredients
+                returned_nutrition = result.get('nutrition')
+                returned_ingredients = result.get('recipeIngredient', [])
+                logger.info(f"[Mealie] Response nutrition: {returned_nutrition}")
+                logger.info(f"[Mealie] Response has {len(returned_ingredients)} ingredients")
+                if returned_ingredients:
+                    logger.info(f"[Mealie] First ingredient: {returned_ingredients[0] if returned_ingredients else 'None'}")
+                
                 return result
             except Exception:
                 return {"id": ident, "update_raw": put_resp.text}
