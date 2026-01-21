@@ -466,7 +466,8 @@ document.addEventListener('DOMContentLoaded', function() {
             <div class="history-item ${statusInfo.class}"
                  data-history-id="${historyId || ''}"
                  data-job-id="${jobId || ''}"
-                 data-source-type="${item.source_type}">
+                 data-source-type="${item.source_type}"
+                 data-url="${escapeHtml(item.url || '')}">
                 <div class="history-checkbox">
                     <input type="checkbox" class="item-checkbox" ${isSelected ? 'checked' : ''}>
                 </div>
@@ -571,7 +572,10 @@ document.addEventListener('DOMContentLoaded', function() {
             if (retryBtn) {
                 retryBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    retryAnalysis(item.querySelector('.history-url').textContent);
+                    const fullUrl = item.dataset.url;
+                    if (fullUrl) {
+                        retryAnalysis(fullUrl);
+                    }
                 });
             }
             
