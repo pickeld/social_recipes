@@ -276,6 +276,10 @@ class Mealie(RecipeExporter):
         logger.info(f"[Mealie] Built nutrition: {nutrition}")
         if nutrition:
             update_payload["nutrition"] = nutrition
+            # Enable nutrition display in Mealie settings
+            update_payload["settings"] = update_payload.get("settings", {})
+            if isinstance(update_payload["settings"], dict):
+                update_payload["settings"]["showNutrition"] = True
             self._log(f"Including nutrition: {nutrition}")
         else:
             logger.warning("[Mealie] No nutrition to include")
@@ -371,7 +375,14 @@ class Mealie(RecipeExporter):
         
         # Merge update fields into the existing recipe (Mealie PUT requires complete object)
         update_payload = current.copy()
+        
+        # Log what's in current nutrition before merge
+        logger.info(f"[Mealie] Current recipe nutrition before merge: {current.get('nutrition')}")
+        
         update_payload.update(update_fields)
+        
+        # Log what's in update_payload nutrition after merge
+        logger.info(f"[Mealie] Update payload nutrition after merge: {update_payload.get('nutrition')}")
 
         # Use PUT (Mealie's PATCH can be temperamental)
         put_url = f"{self.base_url}/api/recipes/{ident}"
