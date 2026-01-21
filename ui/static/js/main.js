@@ -50,6 +50,8 @@ document.addEventListener('DOMContentLoaded', function() {
         console.log('Connected to server');
         // Restore active jobs on reconnect
         restoreActiveJobs();
+        // Check for pending uploads that need confirmation (cross-device support)
+        checkPendingUploads();
     });
     
     socket.on('disconnect', function() {
@@ -107,10 +109,8 @@ document.addEventListener('DOMContentLoaded', function() {
     if (confirmUploadBtn) {
         confirmUploadBtn.addEventListener('click', function() {
             if (currentUploadId) {
-                socket.emit('confirm_upload', {
-                    upload_id: currentUploadId,
-                    selected_image_index: selectedImageIndex
-                });
+                // Use REST API for cross-device support, with WebSocket as fallback
+                confirmUploadViaAPI(currentUploadId, selectedImageIndex);
                 hidePreviewModal();
             }
         });
@@ -119,7 +119,8 @@ document.addEventListener('DOMContentLoaded', function() {
     if (cancelUploadBtn) {
         cancelUploadBtn.addEventListener('click', function() {
             if (currentUploadId) {
-                socket.emit('cancel_upload', { upload_id: currentUploadId });
+                // Use REST API for cross-device support, with WebSocket as fallback
+                cancelUploadViaAPI(currentUploadId);
                 hidePreviewModal();
             }
         });
@@ -580,6 +581,102 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         currentUploadId = null;
         currentPreviewJobId = null;
+    }
+    
+    // ===== Pending Uploads Functions (Cross-Device Support) =====
+    
+    /**
+     * Check for pending uploads that need confirmation
+     * This enables cross-device confirmation - start on phone, confirm on PC
+     */
+    async function checkPendingUploads() {
+        try {
+            const response = await fetch('/api/pending-uploads');
+            const data = await response.json();
+            
+            if (data.pending_uploads && data.pending_uploads.length > 0) {
+                // Show the first pending upload (there's usually only one)
+                const pending = data.pending_uploads[0];
+                showNotification(`Recipe "${pending.recipe.name || 'Untitled'}" is waiting for your confirmation!`, 'info');
+                
+                // Show preview modal with the pending upload data
+                showPreviewModal({
+                    upload_id: pending.upload_id,
+                    job_id: pending.job_id,
+                    recipe: pending.recipe,
+                    image_data: pending.image_data,
+                    candidate_images: pending.candidate_images,
+                    best_image_index: pending.best_image_index,
+                    output_target: pending.output_target,
+                    export_to_both: false  // Can be enhanced to check config
+                });
+            }
+        } catch (error) {
+            console.error('Error checking pending uploads:', error);
+        }
+    }
+    
+    /**
+     * Confirm upload via REST API (works from any device/session)
+     */
+    async function confirmUploadViaAPI(uploadId, selectedImageIndex) {
+        try {
+            const response = await fetch(`/api/pending-uploads/${uploadId}/confirm`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ selected_image_index: selectedImageIndex })
+            });
+            
+            const data = await response.json();
+            
+            if (data.error) {
+                showNotification(data.error, 'error');
+                // Fallback to WebSocket
+                socket.emit('confirm_upload', {
+                    upload_id: uploadId,
+                    selected_image_index: selectedImageIndex
+                });
+            } else {
+                showNotification('Upload confirmed!', 'success');
+            }
+        } catch (error) {
+            console.error('Error confirming upload via API:', error);
+            // Fallback to WebSocket
+            socket.emit('confirm_upload', {
+                upload_id: uploadId,
+                selected_image_index: selectedImageIndex
+            });
+        }
+    }
+    
+    /**
+     * Cancel upload via REST API (works from any device/session)
+     */
+    async function cancelUploadViaAPI(uploadId) {
+        try {
+            const response = await fetch(`/api/pending-uploads/${uploadId}/cancel`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            });
+            
+            const data = await response.json();
+            
+            if (data.error) {
+                showNotification(data.error, 'error');
+                // Fallback to WebSocket
+                socket.emit('cancel_upload', { upload_id: uploadId });
+            } else {
+                showNotification('Upload cancelled', 'info');
+            }
+        } catch (error) {
+            console.error('Error cancelling upload via API:', error);
+            // Fallback to WebSocket
+            socket.emit('cancel_upload', { upload_id: uploadId });
+        }
     }
     
     // ===== Utility Functions =====

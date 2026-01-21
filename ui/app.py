@@ -23,7 +23,10 @@ from database import (
     get_history, get_history_entry, get_history_count, delete_history_entry,
     delete_history_entries_bulk, delete_job_entry, delete_jobs_bulk,
     get_combined_history_and_jobs, get_combined_history_and_jobs_count,
-    get_job, get_active_jobs
+    get_job, get_active_jobs,
+    create_pending_upload, get_pending_upload, get_pending_uploads,
+    confirm_pending_upload, cancel_pending_upload, delete_pending_upload,
+    cleanup_expired_pending_uploads
 )
 from job_manager import init_job_manager, get_job_manager
 
@@ -555,6 +558,142 @@ def import_settings():
     })
 
 
+# ===== Pending Uploads API Endpoints =====
+
+@app.route('/api/pending-uploads', methods=['GET'])
+@api_login_required
+def get_pending_uploads_api():
+    """Get all pending recipe uploads waiting for confirmation.
+    
+    This allows any device/session to see pending uploads and confirm/cancel them.
+    """
+    # Clean up expired uploads first
+    cleanup_expired_pending_uploads()
+    
+    pending = get_pending_uploads()
+    
+    # Prepare response with image data for each pending upload
+    results = []
+    for upload in pending:
+        item = {
+            'upload_id': upload['id'],
+            'job_id': upload['job_id'],
+            'recipe': upload['recipe_data'],
+            'output_target': upload['output_target'],
+            'best_image_index': upload.get('best_image_index', 0),
+            'selected_image_index': upload.get('selected_image_index', 0),
+            'url': upload.get('url'),
+            'video_title': upload.get('video_title'),
+            'created_at': upload.get('created_at'),
+            'expires_at': upload.get('expires_at'),
+        }
+        
+        # Load image data if available
+        image_path = upload.get('image_path')
+        if image_path and os.path.exists(image_path):
+            with open(image_path, 'rb') as f:
+                item['image_data'] = base64.b64encode(f.read()).decode('utf-8')
+        
+        # Load candidate images
+        image_candidates = upload.get('image_candidates', [])
+        candidate_images_data = []
+        for idx, candidate_path in enumerate(image_candidates):
+            if os.path.exists(candidate_path):
+                with open(candidate_path, 'rb') as f:
+                    candidate_images_data.append({
+                        'index': idx,
+                        'data': base64.b64encode(f.read()).decode('utf-8'),
+                        'path': candidate_path,
+                        'is_best': idx == upload.get('best_image_index', 0)
+                    })
+        item['candidate_images'] = candidate_images_data
+        
+        results.append(item)
+    
+    return jsonify({'pending_uploads': results})
+
+
+@app.route('/api/pending-uploads/<upload_id>', methods=['GET'])
+@api_login_required
+def get_pending_upload_api(upload_id):
+    """Get a specific pending upload by ID."""
+    upload = get_pending_upload(upload_id)
+    if not upload or upload['status'] != 'pending':
+        return jsonify({'error': 'Pending upload not found'}), 404
+    
+    item = {
+        'upload_id': upload['id'],
+        'job_id': upload['job_id'],
+        'recipe': upload['recipe_data'],
+        'output_target': upload['output_target'],
+        'best_image_index': upload.get('best_image_index', 0),
+        'selected_image_index': upload.get('selected_image_index', 0),
+        'created_at': upload.get('created_at'),
+        'expires_at': upload.get('expires_at'),
+    }
+    
+    # Load image data if available
+    image_path = upload.get('image_path')
+    if image_path and os.path.exists(image_path):
+        with open(image_path, 'rb') as f:
+            item['image_data'] = base64.b64encode(f.read()).decode('utf-8')
+    
+    # Load candidate images
+    image_candidates = upload.get('image_candidates', [])
+    candidate_images_data = []
+    for idx, candidate_path in enumerate(image_candidates):
+        if os.path.exists(candidate_path):
+            with open(candidate_path, 'rb') as f:
+                candidate_images_data.append({
+                    'index': idx,
+                    'data': base64.b64encode(f.read()).decode('utf-8'),
+                    'path': candidate_path,
+                    'is_best': idx == upload.get('best_image_index', 0)
+                })
+    item['candidate_images'] = candidate_images_data
+    
+    return jsonify(item)
+
+
+@app.route('/api/pending-uploads/<upload_id>/confirm', methods=['POST'])
+@api_login_required
+def confirm_pending_upload_api(upload_id):
+    """Confirm a pending upload via REST API (works from any device/session)."""
+    data = request.get_json() or {}
+    selected_image_index = data.get('selected_image_index')
+    
+    # Update database
+    result = confirm_pending_upload(upload_id, selected_image_index)
+    if not result:
+        return jsonify({'error': 'Pending upload not found or already processed'}), 404
+    
+    # Also trigger the in-memory event if it exists (for the waiting thread)
+    if upload_id in pending_uploads:
+        pending_uploads[upload_id]['confirmed'] = True
+        if selected_image_index is not None:
+            pending_uploads[upload_id]['selected_image_index'] = selected_image_index
+        pending_uploads[upload_id]['event'].set()
+    
+    return jsonify({'status': 'confirmed', 'upload_id': upload_id})
+
+
+@app.route('/api/pending-uploads/<upload_id>/cancel', methods=['POST'])
+@api_login_required
+def cancel_pending_upload_api(upload_id):
+    """Cancel a pending upload via REST API (works from any device/session)."""
+    # Update database
+    result = cancel_pending_upload(upload_id)
+    if not result:
+        return jsonify({'error': 'Pending upload not found or already processed'}), 404
+    
+    # Also trigger the in-memory event if it exists (for the waiting thread)
+    if upload_id in pending_uploads:
+        pending_uploads[upload_id]['confirmed'] = False
+        pending_uploads[upload_id]['event'].set()
+    
+    return jsonify({'status': 'cancelled', 'upload_id': upload_id})
+
+
 # ===== Legacy API (kept for backward compatibility) =====
 
 @app.route('/api/process', methods=['POST'])
@@ -747,6 +886,7 @@ def process_video_job(job_id, jm):
             confirm_event = threading.Event()
             upload_id = secrets.token_hex(16)
 
+            # Store in-memory for WebSocket-based confirmation
             pending_uploads[upload_id] = {
                 'recipe': recipe_data,
                 'image_path': image_path,
@@ -757,6 +897,18 @@ def process_video_job(job_id, jm):
                 'selected_image_index': best_image_index,
                 'job_id': job_id
             }
+            
+            # Also store in database for cross-device/session confirmation via REST API
+            create_pending_upload(
+                upload_id=upload_id,
+                job_id=job_id,
+                recipe_data=recipe_data,
+                image_path=image_path,
+                image_candidates=image_candidates,
+                output_target=config.OUTPUT_TARGET,
+                best_image_index=best_image_index,
+                timeout_minutes=5
+            )
 
             # Determine display target for preview
             if config.EXPORT_TO_BOTH:
@@ -788,17 +940,65 @@ def process_video_job(job_id, jm):
                 'export_to_both': config.EXPORT_TO_BOTH
             })
 
-            # Wait for user response (with timeout)
-            confirmed = confirm_event.wait(timeout=300)  # 5 minute timeout
+            # Wait for user response with polling for database changes
+            # This allows confirmation from any device/session via REST API
+            import time
+            timeout_seconds = 300  # 5 minute timeout
+            poll_interval = 1  # Check database every second
+            elapsed = 0
+            confirmed = False
+            db_confirmed = False
+            selected_idx = best_image_index
+            
+            while elapsed < timeout_seconds:
+                # Check in-memory event (WebSocket confirmation)
+                if confirm_event.wait(timeout=poll_interval):
+                    confirmed = True
+                    break
+                
+                # Check database for REST API confirmation
+                db_upload = get_pending_upload(upload_id)
+                if db_upload:
+                    if db_upload['status'] == 'confirmed':
+                        db_confirmed = True
+                        confirmed = True
+                        selected_idx = db_upload.get('selected_image_index', best_image_index)
+                        break
+                    elif db_upload['status'] == 'cancelled':
+                        # Cancelled via REST API
+                        confirmed = True  # Event was handled
+                        break
+                    elif db_upload['status'] == 'expired':
+                        # Expired
+                        break
+                
+                elapsed += poll_interval
+                
+                # Check for job cancellation
+                if jm.is_cancelled(job_id):
+                    delete_pending_upload(upload_id)
+                    pending_uploads.pop(upload_id, None)
+                    return
+            
+            # Clean up database record
+            db_upload = get_pending_upload(upload_id)
+            delete_pending_upload(upload_id)
             
             # Check if we actually got a confirmation or just timed out
             pending_data = pending_uploads.pop(upload_id, None)
             
-            if not confirmed:
+            if not confirmed and elapsed >= timeout_seconds:
                 jm.fail_job(job_id, 'Upload confirmation timed out')
                 return
             
-            if pending_data and not pending_data.get('confirmed', False):
+            # Determine confirmation status from either source
+            was_confirmed = False
+            if db_confirmed:
+                was_confirmed = (db_upload and db_upload['status'] == 'confirmed')
+            elif pending_data:
+                was_confirmed = pending_data.get('confirmed', False)
+            
+            if not was_confirmed:
                 jm.update_progress(job_id, 'cancelled', 'Upload cancelled by user', 100)
                 socketio.emit('recipe_cancelled', {
                     'job_id': job_id,
@@ -811,7 +1011,8 @@ def process_video_job(job_id, jm):
                 return
             
             # Use the user-selected image if available
-            selected_idx = pending_data.get('selected_image_index', best_image_index)
+            if not db_confirmed and pending_data:
+                selected_idx = pending_data.get('selected_image_index', best_image_index)
             if image_candidates and 0 <= selected_idx < len(image_candidates):
                 image_path = image_candidates[selected_idx]
 

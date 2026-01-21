@@ -72,6 +72,24 @@ def init_db():
             )
         ''')
         
+        # Create pending_uploads table for recipe confirmations
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS pending_uploads (
+                id TEXT PRIMARY KEY,
+                job_id TEXT NOT NULL,
+                recipe_data TEXT NOT NULL,
+                image_path TEXT,
+                image_candidates TEXT,
+                output_target TEXT,
+                selected_image_index INTEGER DEFAULT 0,
+                best_image_index INTEGER DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP,
+                FOREIGN KEY (job_id) REFERENCES recipe_jobs(id)
+            )
+        ''')
+        
         # Create recipe_history table for completed recipes
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS recipe_history (
@@ -672,6 +690,139 @@ def cleanup_old_jobs(hours: int = 24) -> int:
             WHERE status IN ('completed', 'failed', 'cancelled')
             AND updated_at < datetime('now', ? || ' hours')
         ''', (f'-{hours}',))
+        conn.commit()
+        return cursor.rowcount
+
+
+# ===== Pending Upload Functions =====
+
+def create_pending_upload(upload_id: str, job_id: str, recipe_data: Dict,
+                          image_path: Optional[str], image_candidates: List[str],
+                          output_target: str, best_image_index: int = 0,
+                          timeout_minutes: int = 5) -> bool:
+    """Create a pending upload waiting for confirmation."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        recipe_json = json.dumps(recipe_data)
+        candidates_json = json.dumps(image_candidates) if image_candidates else None
+        cursor.execute('''
+            INSERT INTO pending_uploads
+            (id, job_id, recipe_data, image_path, image_candidates, output_target,
+             selected_image_index, best_image_index, status, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending',
+                    datetime('now', '+' || ? || ' minutes'))
+        ''', (upload_id, job_id, recipe_json, image_path, candidates_json,
+              output_target, best_image_index, best_image_index, timeout_minutes))
+        conn.commit()
+        return True
+
+
+def get_pending_upload(upload_id: str) -> Optional[Dict[str, Any]]:
+    """Get a pending upload by ID."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM pending_uploads WHERE id = ?', (upload_id,))
+        row = cursor.fetchone()
+        if row:
+            item = dict(row)
+            # Parse JSON fields
+            if item.get('recipe_data'):
+                try:
+                    item['recipe_data'] = json.loads(item['recipe_data'])
+                except json.JSONDecodeError:
+                    pass
+            if item.get('image_candidates'):
+                try:
+                    item['image_candidates'] = json.loads(item['image_candidates'])
+                except json.JSONDecodeError:
+                    item['image_candidates'] = []
+            return item
+    return None
+
+
+def get_pending_uploads() -> List[Dict[str, Any]]:
+    """Get all pending uploads that haven't expired."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT pu.*, rj.url, rj.video_title
+            FROM pending_uploads pu
+            LEFT JOIN recipe_jobs rj ON pu.job_id = rj.id
+            WHERE pu.status = 'pending'
+            AND (pu.expires_at IS NULL OR pu.expires_at > datetime('now'))
+            ORDER BY pu.created_at DESC
+        ''')
+        results = []
+        for row in cursor.fetchall():
+            item = dict(row)
+            # Parse JSON fields
+            if item.get('recipe_data'):
+                try:
+                    item['recipe_data'] = json.loads(item['recipe_data'])
+                except json.JSONDecodeError:
+                    pass
+            if item.get('image_candidates'):
+                try:
+                    item['image_candidates'] = json.loads(item['image_candidates'])
+                except json.JSONDecodeError:
+                    item['image_candidates'] = []
+            results.append(item)
+        return results
+
+
+def confirm_pending_upload(upload_id: str, selected_image_index: Optional[int] = None) -> bool:
+    """Mark a pending upload as confirmed."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        if selected_image_index is not None:
+            cursor.execute('''
+                UPDATE pending_uploads
+                SET status = 'confirmed', selected_image_index = ?
+                WHERE id = ? AND status = 'pending'
+            ''', (selected_image_index, upload_id))
+        else:
+            cursor.execute('''
+                UPDATE pending_uploads
+                SET status = 'confirmed'
+                WHERE id = ? AND status = 'pending'
+            ''', (upload_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def cancel_pending_upload(upload_id: str) -> bool:
+    """Mark a pending upload as cancelled."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE pending_uploads
+            SET status = 'cancelled'
+            WHERE id = ? AND status = 'pending'
+        ''', (upload_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def delete_pending_upload(upload_id: str) -> bool:
+    """Delete a pending upload record."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM pending_uploads WHERE id = ?', (upload_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def cleanup_expired_pending_uploads() -> int:
+    """Clean up expired pending uploads."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE pending_uploads
+            SET status = 'expired'
+            WHERE status = 'pending'
+            AND expires_at IS NOT NULL
+            AND expires_at < datetime('now')
+        ''')
         conn.commit()
         return cursor.rowcount
 
