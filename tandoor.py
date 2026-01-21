@@ -482,6 +482,7 @@ class Tandoor(RecipeExporter):
 
         recipe_name = payload.get('name', 'Unknown')
         logger.info(f"[Upload] Creating recipe in Tandoor: {recipe_name}")
+        logger.info(f"[Tandoor] Payload has nutrition: {'nutrition' in payload}, value: {payload.get('nutrition')}")
         self._log(f"Creating recipe: {recipe_name}")
         self._log(f"POST {create_url}")
 
