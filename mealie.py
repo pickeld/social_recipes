@@ -278,17 +278,27 @@ class Mealie(RecipeExporter):
         # Use PUT (Mealie's PATCH can be temperamental)
         put_url = f"{self.base_url}/api/recipes/{ident}"
         self._log(f"PUT {put_url}")
-        put_resp = self._session.put(put_url, json=update_payload, headers=headers)
-        self._log(f"PUT -> {put_resp.status_code}")
-        
-        if put_resp.status_code >= 400:
-            self._log(f"Update error body: {put_resp.text[:1000]}")
-            put_resp.raise_for_status()
+        logger.info(f"[Mealie] Sending PUT to {put_url} with {len(update_payload.get('recipeIngredient', []))} ingredients")
         
         try:
-            return put_resp.json()
-        except Exception:
-            return {"id": ident, "update_raw": put_resp.text}
+            put_resp = self._session.put(put_url, json=update_payload, headers=headers, timeout=60)
+            self._log(f"PUT -> {put_resp.status_code}")
+            logger.info(f"[Mealie] PUT response status: {put_resp.status_code}")
+            
+            if put_resp.status_code >= 400:
+                self._log(f"Update error body: {put_resp.text[:1000]}")
+                logger.error(f"[Mealie] PUT failed: {put_resp.text[:500]}")
+                put_resp.raise_for_status()
+            
+            try:
+                result = put_resp.json()
+                logger.info(f"[Mealie] PUT succeeded, recipe updated")
+                return result
+            except Exception:
+                return {"id": ident, "update_raw": put_resp.text}
+        except Exception as e:
+            logger.error(f"[Mealie] PUT request failed with exception: {e}")
+            raise
 
     def upload_image(self, recipe_id: str | int, image_path: str) -> bool:
         """
