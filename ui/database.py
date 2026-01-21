@@ -440,31 +440,39 @@ def get_combined_history_and_jobs(limit: int = 50, offset: int = 0,
         cursor = conn.cursor()
         
         # Build query for recipe_history
+        # Exclude failed entries if there's a successful entry for the same URL
         history_query = '''
             SELECT
                 'history' as source_type,
-                id,
-                job_id,
-                url,
-                video_title,
-                recipe_name,
-                recipe_data,
-                thumbnail_path,
-                thumbnail_data,
-                status,
-                error_message,
-                output_target,
-                created_at,
+                rh.id,
+                rh.job_id,
+                rh.url,
+                rh.video_title,
+                rh.recipe_name,
+                rh.recipe_data,
+                rh.thumbnail_path,
+                rh.thumbnail_data,
+                rh.status,
+                rh.error_message,
+                rh.output_target,
+                rh.created_at,
                 NULL as progress,
                 NULL as current_stage,
                 NULL as stage_message,
-                created_at as updated_at
-            FROM recipe_history
-            WHERE 1=1
+                rh.created_at as updated_at
+            FROM recipe_history rh
+            WHERE NOT (
+                rh.status = 'failed'
+                AND EXISTS (
+                    SELECT 1 FROM recipe_history rh2
+                    WHERE rh2.url = rh.url AND rh2.status = 'success'
+                )
+            )
         '''
         history_params = []
         
-        # Build query for recipe_jobs (only non-completed jobs that don't have history entries)
+        # Build query for recipe_jobs (only active jobs that don't have history entries)
+        # Exclude completed/failed jobs as they should have history entries
         jobs_query = '''
             SELECT
                 'job' as source_type,
@@ -486,18 +494,18 @@ def get_combined_history_and_jobs(limit: int = 50, offset: int = 0,
                 rj.updated_at
             FROM recipe_jobs rj
             LEFT JOIN recipe_history rh ON rj.id = rh.job_id
-            WHERE rh.id IS NULL
+            WHERE rh.id IS NULL AND rj.status NOT IN ('completed', 'failed')
         '''
         jobs_params = []
         
         # Apply status filter
         if status_filter:
             if status_filter == 'success':
-                history_query += ' AND status = ?'
+                history_query += ' AND rh.status = ?'
                 history_params.append('success')
                 jobs_query += ' AND 1=0'  # No jobs can be "success" without history
             elif status_filter == 'failed':
-                history_query += ' AND status = ?'
+                history_query += ' AND rh.status = ?'
                 history_params.append('failed')
                 jobs_query += ' AND rj.status = ?'
                 jobs_params.append('failed')
@@ -517,7 +525,7 @@ def get_combined_history_and_jobs(limit: int = 50, offset: int = 0,
         # Apply search filter
         if search:
             search_pattern = f'%{search}%'
-            history_query += ' AND (recipe_name LIKE ? OR video_title LIKE ? OR url LIKE ?)'
+            history_query += ' AND (rh.recipe_name LIKE ? OR rh.video_title LIKE ? OR rh.url LIKE ?)'
             history_params.extend([search_pattern, search_pattern, search_pattern])
             jobs_query += ' AND (rj.video_title LIKE ? OR rj.url LIKE ?)'
             jobs_params.extend([search_pattern, search_pattern])
@@ -563,26 +571,37 @@ def get_combined_history_and_jobs_count(status_filter: Optional[str] = None,
         cursor = conn.cursor()
         
         # Count from recipe_history
-        history_query = 'SELECT COUNT(*) FROM recipe_history WHERE 1=1'
+        # Exclude failed entries if there's a successful entry for the same URL
+        history_query = '''
+            SELECT COUNT(*) FROM recipe_history rh
+            WHERE NOT (
+                rh.status = 'failed'
+                AND EXISTS (
+                    SELECT 1 FROM recipe_history rh2
+                    WHERE rh2.url = rh.url AND rh2.status = 'success'
+                )
+            )
+        '''
         history_params = []
         
-        # Count from recipe_jobs (only non-completed jobs that don't have history entries)
+        # Count from recipe_jobs (only active jobs that don't have history entries)
+        # Exclude completed/failed jobs as they should have history entries
         jobs_query = '''
             SELECT COUNT(*) FROM recipe_jobs rj
             LEFT JOIN recipe_history rh ON rj.id = rh.job_id
-            WHERE rh.id IS NULL
+            WHERE rh.id IS NULL AND rj.status NOT IN ('completed', 'failed')
         '''
         jobs_params = []
         
         # Apply status filter
         if status_filter:
             if status_filter == 'success':
-                history_query += ' AND status = ?'
+                history_query += ' AND rh.status = ?'
                 history_params.append('success')
                 jobs_query = 'SELECT 0'  # No jobs can be "success" without history
                 jobs_params = []
             elif status_filter == 'failed':
-                history_query += ' AND status = ?'
+                history_query += ' AND rh.status = ?'
                 history_params.append('failed')
                 jobs_query += ' AND rj.status = ?'
                 jobs_params.append('failed')
@@ -606,7 +625,7 @@ def get_combined_history_and_jobs_count(status_filter: Optional[str] = None,
         if search:
             search_pattern = f'%{search}%'
             if 'SELECT 0' not in history_query:
-                history_query += ' AND (recipe_name LIKE ? OR video_title LIKE ? OR url LIKE ?)'
+                history_query += ' AND (rh.recipe_name LIKE ? OR rh.video_title LIKE ? OR rh.url LIKE ?)'
                 history_params.extend([search_pattern, search_pattern, search_pattern])
             if 'SELECT 0' not in jobs_query:
                 jobs_query += ' AND (rj.video_title LIKE ? OR rj.url LIKE ?)'
