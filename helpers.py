@@ -195,21 +195,26 @@ Required fields:
 - "recipeInstructions" (array of HowToStep objects: {{ "@type": "HowToStep", "text": "<step>" }})
 
 Ingredients (MUST provide BOTH):
-1) "recipeIngredients" (array of objects for Mealie). Each item MUST be:
+1) "recipeIngredients" (array of objects for Mealie/Tandoor export). Each item MUST be:
    {{
      "food": "<base ingredient noun in {target_lang}>",
      "quantity": "<number or range as string, or empty string if unknown>",
-     "unit": "<unit in {target_lang}, or empty string if none>",
-     "note": "<prep/brand/extra notes in {target_lang}, or empty string>"
+     "unit": "<unit abbreviation or name in {target_lang}, or empty string if none>",
+     "notes": "<prep/brand/extra notes in {target_lang}, or empty string>",
+     "raw": "<full ingredient line as shown in recipe, for display fallback>"
    }}
    Rules:
+   - "food" MUST be the core ingredient name only (e.g., "flour", "chicken breast", "olive oil").
+   - "unit" MUST be a measurement unit only (e.g., "g", "kg", "ml", "cup", "tbsp", "tsp", "piece").
+   - Do NOT include modifiers or prep instructions in "food" or "unit" - put them in "notes".
    - Do NOT invent quantities. If missing/unclear → "quantity": "" and "unit": "".
    - Preserve numeric ranges literally, e.g., "3-4".
-   - Put prep words (e.g., קצוץ / chopped) and clarifiers into "note".
-   - Merge true duplicates (identical food+quantity+unit+note).
+   - Put prep words (e.g., קצוץ / chopped, melted, room temperature) into "notes".
+   - "raw" should be the complete ingredient line for display purposes.
+   - Merge true duplicates (identical food+quantity+unit+notes).
 
 2) "recipeIngredient" (array of strings for Schema.org), derived from recipeIngredients:
-   - Compose each line as: "<quantity> <unit> <food> <note>" (skip empties; normalize spaces).
+   - Compose each line as: "<quantity> <unit> <food> <notes>" (skip empties; normalize spaces).
    - Preserve order.
 
 General rules:
