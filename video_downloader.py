@@ -20,7 +20,7 @@ class VideoDownloader:
     def _get_info(self):
         """Fetch metadata (description, title, etc.) without downloading the video."""
         logger.debug(f"Fetching video info for: {self.url}")
-        ydl_opts = {"quiet": True, "no_warnings": True, "skip_download": True}
+        ydl_opts = {"quiet": True, "no_warnings": True, "skip_download": True, "remote_components": ["ejs:github"]}
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(self.url, download=False)
         self.video_id = info.get("id")
@@ -43,6 +43,7 @@ class VideoDownloader:
                 "outtmpl": video_path,
                 "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
                 "merge_output_format": "mp4",
+                "remote_components": ["ejs:github"],
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([self.url])
