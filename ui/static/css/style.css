@@ -661,6 +661,22 @@ main.with-sidebar {
     font-size: 0.85em;
 }
 
+/* Cookies upload container */
+.cookies-upload-container {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.cookies-status {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
 .password-section {
     margin-top: 3rem;
 }

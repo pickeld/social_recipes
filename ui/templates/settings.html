@@ -165,13 +165,32 @@
             </div>
             
             <div class="form-group">
-                <label for="yt_dlp_cookies_file">Cookies File Path</label>
-                <input type="text" id="yt_dlp_cookies_file" name="yt_dlp_cookies_file"
-                       value="{{ config.yt_dlp_cookies_file }}" placeholder="/data/cookies.txt">
+                <label>Upload Cookies File</label>
+                <div class="cookies-upload-container">
+                    <label for="cookies-file-upload" class="btn btn-secondary">
+                        <i class="fas fa-upload"></i>
+                        Choose cookies.txt file
+                    </label>
+                    <input type="file" id="cookies-file-upload" accept=".txt" style="display: none;">
+                    <span id="cookies-file-status" class="cookies-status">
+                        {% if config.yt_dlp_cookies_file %}
+                            <i class="fas fa-check-circle" style="color: var(--success-color);"></i>
+                            Cookies file configured
+                        {% else %}
+                            No cookies file uploaded
+                        {% endif %}
+                    </span>
+                </div>
                 <small class="form-hint">
-                    Path to a Netscape-format cookies.txt file (takes priority over browser extraction).
+                    Upload a Netscape-format cookies.txt file exported from your browser.
                     <a href="https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp" target="_blank">How to export cookies</a>
                 </small>
+            </div>
+            
+            <div class="form-group" style="display: none;">
+                <label for="yt_dlp_cookies_file">Cookies File Path (auto-configured)</label>
+                <input type="text" id="yt_dlp_cookies_file" name="yt_dlp_cookies_file"
+                       value="{{ config.yt_dlp_cookies_file }}" readonly>
             </div>
             
             <div class="alert alert-info">
@@ -181,7 +200,7 @@
                     <li>Install a browser extension like "Get cookies.txt LOCALLY" or "cookies.txt"</li>
                     <li>Log into YouTube in your browser</li>
                     <li>Use the extension to export cookies for youtube.com</li>
-                    <li>Save the file and enter the path above (e.g., <code>/data/cookies.txt</code> for Docker)</li>
+                    <li>Click "Choose cookies.txt file" above to upload the exported file</li>
                 </ol>
             </div>
         </div>
@@ -311,6 +330,45 @@ document.getElementById('import-settings-file').addEventListener('change', async
         window.location.reload();
     } catch (error) {
         alert('Error importing settings: ' + error.message);
+    }
+    
+    // Reset the file input
+    e.target.value = '';
+});
+
+// Cookies file upload functionality
+document.getElementById('cookies-file-upload').addEventListener('change', async function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const statusEl = document.getElementById('cookies-file-status');
+    const cookiesPathInput = document.getElementById('yt_dlp_cookies_file');
+    
+    statusEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Uploading...';
+    
+    try {
+        const formData = new FormData();
+        formData.append('cookies_file', file);
+        
+        const response = await fetch('/api/cookies/upload', {
+            method: 'POST',
+            body: formData
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Failed to upload cookies file');
+        }
+        
+        const data = await response.json();
+        
+        // Update the hidden path input
+        cookiesPathInput.value = data.path;
+        
+        statusEl.innerHTML = '<i class="fas fa-check-circle" style="color: var(--success-color);"></i> ' + data.message;
+        
+    } catch (error) {
+        statusEl.innerHTML = '<i class="fas fa-times-circle" style="color: var(--error-color);"></i> ' + error.message;
     }
     
     // Reset the file input

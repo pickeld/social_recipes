@@ -560,6 +560,94 @@ def import_settings():
     })
 
 
+@app.route('/api/cookies/upload', methods=['POST'])
+@api_login_required
+def upload_cookies_file():
+    """Upload a cookies.txt file for yt-dlp authentication.
+    
+    Saves the uploaded file to the data directory and updates the config.
+    """
+    if 'cookies_file' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+    
+    file = request.files['cookies_file']
+    
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+    
+    # Validate file extension
+    if not file.filename.endswith('.txt'):
+        return jsonify({'error': 'File must be a .txt file'}), 400
+    
+    # Read and validate content looks like a cookies file
+    content = file.read().decode('utf-8', errors='ignore')
+    
+    # Basic validation: Netscape cookies files typically start with a comment
+    # or have tab-separated values with domain names
+    if not content.strip():
+        return jsonify({'error': 'File is empty'}), 400
+    
+    # Check for basic cookies file structure (domain, flag, path, secure, expiration, name, value)
+    lines = content.strip().split('\n')
+    valid_lines = 0
+    for line in lines:
+        line = line.strip()
+        if line.startswith('#') or not line:
+            continue  # Comment or empty line
+        parts = line.split('\t')
+        if len(parts) >= 7:
+            valid_lines += 1
+    
+    if valid_lines == 0:
+        return jsonify({'error': 'File does not appear to be a valid Netscape cookies.txt format'}), 400
+    
+    # Save the file to the data directory
+    from config import DATA_DIR
+    cookies_path = os.path.join(DATA_DIR, 'cookies.txt')
+    
+    try:
+        with open(cookies_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+    except IOError as e:
+        return jsonify({'error': f'Failed to save cookies file: {str(e)}'}), 500
+    
+    # Update the configuration
+    config = load_config()
+    config['yt_dlp_cookies_file'] = cookies_path
+    save_config(config)
+    
+    return jsonify({
+        'status': 'success',
+        'message': f'Cookies file uploaded ({valid_lines} cookies found)',
+        'path': cookies_path
+    })
+
+
+@app.route('/api/cookies/delete', methods=['DELETE'])
+@api_login_required
+def delete_cookies_file():
+    """Delete the uploaded cookies file."""
+    from config import DATA_DIR
+    
+    cookies_path = os.path.join(DATA_DIR, 'cookies.txt')
+    
+    if os.path.exists(cookies_path):
+        try:
+            os.remove(cookies_path)
+        except IOError as e:
+            return jsonify({'error': f'Failed to delete cookies file: {str(e)}'}), 500
+    
+    # Clear the configuration
+    config = load_config()
+    config['yt_dlp_cookies_file'] = ''
+    save_config(config)
+    
+    return jsonify({
+        'status': 'success',
+        'message': 'Cookies file deleted'
+    })
+
+
 # ===== Pending Uploads API Endpoints =====
 
 @app.route('/api/pending-uploads', methods=['GET'])
