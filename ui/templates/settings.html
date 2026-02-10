@@ -143,6 +143,49 @@
             </div>
         </div>
         
+        <!-- YouTube / Video Download Settings -->
+        <div class="settings-section">
+            <h2><i class="fab fa-youtube"></i> YouTube / Video Downloads</h2>
+            <p class="section-description">Configure authentication for YouTube and other video platforms. This is required if you see "Sign in to confirm you're not a bot" errors.</p>
+            
+            <div class="form-group">
+                <label for="yt_dlp_cookies_browser">Extract Cookies from Browser</label>
+                <select id="yt_dlp_cookies_browser" name="yt_dlp_cookies_browser" class="form-select">
+                    <option value="" {% if not config.yt_dlp_cookies_browser %}selected{% endif %}>None (disabled)</option>
+                    <option value="chrome" {% if config.yt_dlp_cookies_browser == 'chrome' %}selected{% endif %}>Chrome</option>
+                    <option value="firefox" {% if config.yt_dlp_cookies_browser == 'firefox' %}selected{% endif %}>Firefox</option>
+                    <option value="safari" {% if config.yt_dlp_cookies_browser == 'safari' %}selected{% endif %}>Safari</option>
+                    <option value="edge" {% if config.yt_dlp_cookies_browser == 'edge' %}selected{% endif %}>Edge</option>
+                    <option value="opera" {% if config.yt_dlp_cookies_browser == 'opera' %}selected{% endif %}>Opera</option>
+                    <option value="brave" {% if config.yt_dlp_cookies_browser == 'brave' %}selected{% endif %}>Brave</option>
+                    <option value="vivaldi" {% if config.yt_dlp_cookies_browser == 'vivaldi' %}selected{% endif %}>Vivaldi</option>
+                    <option value="chromium" {% if config.yt_dlp_cookies_browser == 'chromium' %}selected{% endif %}>Chromium</option>
+                </select>
+                <small class="form-hint">Automatically extract cookies from a browser installed on the server. The browser must be logged into YouTube. <strong>Note:</strong> This only works if Social Recipes runs on the same machine as your browser (not in Docker).</small>
+            </div>
+            
+            <div class="form-group">
+                <label for="yt_dlp_cookies_file">Cookies File Path</label>
+                <input type="text" id="yt_dlp_cookies_file" name="yt_dlp_cookies_file"
+                       value="{{ config.yt_dlp_cookies_file }}" placeholder="/data/cookies.txt">
+                <small class="form-hint">
+                    Path to a Netscape-format cookies.txt file (takes priority over browser extraction).
+                    <a href="https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp" target="_blank">How to export cookies</a>
+                </small>
+            </div>
+            
+            <div class="alert alert-info">
+                <i class="fas fa-info-circle"></i>
+                <strong>How to get cookies:</strong>
+                <ol style="margin: 10px 0 0 20px; padding: 0;">
+                    <li>Install a browser extension like "Get cookies.txt LOCALLY" or "cookies.txt"</li>
+                    <li>Log into YouTube in your browser</li>
+                    <li>Use the extension to export cookies for youtube.com</li>
+                    <li>Save the file and enter the path above (e.g., <code>/data/cookies.txt</code> for Docker)</li>
+                </ol>
+            </div>
+        </div>
+        
         <!-- Upload Settings -->
         <div class="settings-section">
             <h2><i class="fas fa-upload"></i> Upload Settings</h2>

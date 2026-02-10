@@ -29,7 +29,9 @@ DEFAULT_CONFIG = {
     "export_to_both": "false",
     "whisper_model": "small",
     "confirm_before_upload": "true",
-    "hf_token": ""
+    "hf_token": "",
+    "yt_dlp_cookies_file": "",
+    "yt_dlp_cookies_browser": ""
 }
 
 
@@ -145,6 +147,14 @@ class Config:
     @property
     def HF_TOKEN(self) -> str:
         return self._get('hf_token', DEFAULT_CONFIG['hf_token'])
+
+    @property
+    def YT_DLP_COOKIES_FILE(self) -> str:
+        return self._get('yt_dlp_cookies_file', DEFAULT_CONFIG['yt_dlp_cookies_file'])
+
+    @property
+    def YT_DLP_COOKIES_BROWSER(self) -> str:
+        return self._get('yt_dlp_cookies_browser', DEFAULT_CONFIG['yt_dlp_cookies_browser'])
 
     def reload(self):
         """Reload configuration from database."""

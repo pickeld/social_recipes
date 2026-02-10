@@ -17,10 +17,45 @@ class VideoDownloader:
         self.video_id = None
         logger.debug(f"VideoDownloader initialized with URL: {url}")
 
+    def _get_cookie_options(self):
+        """Get yt-dlp cookie options from configuration.
+        
+        Returns a dict with cookie options if configured, empty dict otherwise.
+        Supports two modes:
+        1. cookies_file: Path to a Netscape-format cookies.txt file
+        2. cookies_browser: Browser name to extract cookies from (e.g., 'chrome', 'firefox')
+        """
+        from config import config
+        config.reload()  # Ensure we have latest config
+        
+        cookie_opts = {}
+        
+        # Priority: cookies file > cookies from browser
+        cookies_file = config.YT_DLP_COOKIES_FILE
+        cookies_browser = config.YT_DLP_COOKIES_BROWSER
+        
+        if cookies_file and os.path.exists(cookies_file):
+            cookie_opts['cookiefile'] = cookies_file
+            logger.debug(f"Using cookies file: {cookies_file}")
+        elif cookies_browser:
+            cookie_opts['cookiesfrombrowser'] = (cookies_browser,)
+            logger.debug(f"Using cookies from browser: {cookies_browser}")
+        
+        return cookie_opts
+
     def _get_info(self):
         """Fetch metadata (description, title, etc.) without downloading the video."""
         logger.debug(f"Fetching video info for: {self.url}")
-        ydl_opts = {"quiet": True, "no_warnings": True, "skip_download": True, "remote_components": ["ejs:github"]}
+        ydl_opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "skip_download": True,
+            "remote_components": ["ejs:github"]
+        }
+        
+        # Add cookie options if configured
+        ydl_opts.update(self._get_cookie_options())
+        
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(self.url, download=False)
         self.video_id = info.get("id")
@@ -45,6 +80,10 @@ class VideoDownloader:
                 "merge_output_format": "mp4",
                 "remote_components": ["ejs:github"],
             }
+            
+            # Add cookie options if configured
+            ydl_opts.update(self._get_cookie_options())
+            
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([self.url])
             logger.debug(f"Download completed: {video_path}")

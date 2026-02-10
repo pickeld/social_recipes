@@ -250,6 +250,8 @@ def settings():
         config['export_to_both'] = 'true' if request.form.get('export_to_both') else 'false'
         config['whisper_model'] = request.form.get('whisper_model', 'small')
         config['hf_token'] = request.form.get('hf_token', '')
+        config['yt_dlp_cookies_file'] = request.form.get('yt_dlp_cookies_file', '')
+        config['yt_dlp_cookies_browser'] = request.form.get('yt_dlp_cookies_browser', '')
         # Checkbox: present in form data only when checked
         config['confirm_before_upload'] = 'true' if request.form.get(
             'confirm_before_upload') else 'false'
