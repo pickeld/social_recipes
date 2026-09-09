@@ -277,6 +277,7 @@ export interface AppConfig {
   whisper_model: string
   confirm_before_upload: string
   hf_token: string
+  usda_fdc_api_key: string
   yt_dlp_cookies_file: string
   yt_dlp_cookies_browser: string
   max_concurrent_jobs: string

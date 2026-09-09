@@ -58,6 +58,19 @@
             </div>
         </div>
 
+        <!-- Nutrition -->
+        <div class="settings-section">
+            <h2><i class="fas fa-apple-alt"></i> Nutrition lookup</h2>
+            <p class="section-description">Optional live USDA FoodData Central search when an ingredient is missing from the local table. Leave blank to use the local table only. The USDA_FDC_API_KEY environment variable is used if this field is empty.</p>
+            <div class="form-group">
+                <label for="usda_fdc_api_key">USDA FoodData Central API Key</label>
+                <input type="password" id="usda_fdc_api_key" name="usda_fdc_api_key"
+                       value="{{ config.usda_fdc_api_key }}" placeholder="USDA API key"
+                       autocomplete="off" autocapitalize="none" spellcheck="false">
+                <small class="form-hint">Get a free key at <a href="https://fdc.nal.usda.gov/api-key-signup.html" target="_blank" rel="noreferrer">fdc.nal.usda.gov/api-key-signup.html</a>. The key is stored in this instance's database, never in source code.</small>
+            </div>
+        </div>
+
         <!-- Recipe Language -->
         <div class="settings-section">
             <h2><i class="fas fa-language"></i> Recipe Language</h2>

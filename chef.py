@@ -14,6 +14,7 @@ from recipe_schema import (
     YieldNutritionEstimate,
     apply_yield_nutrition_guardrails,
     ensure_is_recipe,
+    ensure_target_language,
     extract_json,
     parse_recipe_extraction,
     parse_yield_nutrition,
@@ -308,6 +309,7 @@ class Chef:
                 )
                 extraction = parse_recipe_extraction(response_text)
                 ensure_is_recipe(extraction)
+                ensure_target_language(extraction, config.TARGET_LANGUAGE)
                 logger.info(
                     f"[AI Recipe] Recipe parsed. Name: {extraction.name or 'Unknown'}"
                 )

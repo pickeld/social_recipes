@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
+from collections import Counter
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -38,6 +40,48 @@ SERVINGS_MAX = 50
 
 class NotARecipeError(ValueError):
     """The source was not a recipe; Chef must not invent one."""
+
+
+class WrongLanguageError(ValueError):
+    """Chef JSON is not in the configured target language."""
+
+
+_MIN_LANGUAGE_LETTERS = 20
+_MIN_SCRIPT_RATIO = 0.35
+
+_LANG_SCRIPT = {
+    "he": "hebrew",
+    "iw": "hebrew",
+    "hebrew": "hebrew",
+    "ar": "arabic",
+    "arabic": "arabic",
+    "ru": "cyrillic",
+    "russian": "cyrillic",
+    "en": "latin",
+    "english": "latin",
+    "de": "latin",
+    "german": "latin",
+    "fr": "latin",
+    "french": "latin",
+    "es": "latin",
+    "spanish": "latin",
+    "it": "latin",
+    "italian": "latin",
+    "pt": "latin",
+    "portuguese": "latin",
+    "nl": "latin",
+    "dutch": "latin",
+    "pl": "latin",
+    "polish": "latin",
+    "tr": "latin",
+    "turkish": "latin",
+    "zh": "cjk",
+    "chinese": "cjk",
+    "ja": "cjk",
+    "japanese": "cjk",
+    "ko": "cjk",
+    "korean": "cjk",
+}
 
 
 class HowToStep(BaseModel):
@@ -243,6 +287,70 @@ def ensure_is_recipe(extraction: RecipeExtraction) -> None:
             "This doesn't look like a recipe: "
             + (extraction.rejection_reason.strip() or "Source did not contain a usable recipe")
         )
+
+
+def _letter_script(ch: str) -> str | None:
+    if not ch.isalpha():
+        return None
+    try:
+        name = unicodedata.name(ch)
+    except ValueError:
+        return None
+    if name.startswith("HEBREW"):
+        return "hebrew"
+    if name.startswith("ARABIC"):
+        return "arabic"
+    if name.startswith("CYRILLIC"):
+        return "cyrillic"
+    if name.startswith("GREEK"):
+        return "greek"
+    if (
+        name.startswith("HIRAGANA")
+        or name.startswith("KATAKANA")
+        or name.startswith("HANGUL")
+        or "CJK UNIFIED" in name
+        or name.startswith("CJK ")
+    ):
+        return "cjk"
+    if name.startswith("LATIN"):
+        return "latin"
+    return "other"
+
+
+def extraction_language_text(extraction: RecipeExtraction) -> str:
+    """Name, description, and steps — not ingredient nouns, which stay international."""
+    parts = [extraction.name, extraction.description]
+    parts.extend(step.text for step in extraction.recipeInstructions)
+    return " ".join(parts)
+
+
+def target_script(language: str) -> str | None:
+    key = " ".join((language or "").strip().casefold().split())
+    return _LANG_SCRIPT.get(key)
+
+
+def ensure_target_language(extraction: RecipeExtraction, language: str) -> None:
+    """Raise WrongLanguageError when visible recipe text is not in ``language``.
+
+    Skips the check when the language is unknown or the sample is too short.
+    """
+    expected = target_script(language)
+    if expected is None:
+        return
+    counts: Counter[str] = Counter()
+    for ch in extraction_language_text(extraction):
+        script = _letter_script(ch)
+        if script:
+            counts[script] += 1
+    total = sum(counts.values())
+    if total < _MIN_LANGUAGE_LETTERS:
+        return
+    ratio = counts[expected] / total
+    if ratio >= _MIN_SCRIPT_RATIO:
+        return
+    raise WrongLanguageError(
+        f"Recipe text is not in the target language ({language})"
+    )
 
 
 def is_iso8601_duration(value: str) -> bool:

@@ -1125,6 +1125,7 @@ def settings():
         config['mealie_enabled'] = 'true' if request.form.get('mealie_enabled') else 'false'
         config['whisper_model'] = request.form.get('whisper_model', 'small')
         config['hf_token'] = request.form.get('hf_token', '')
+        config['usda_fdc_api_key'] = request.form.get('usda_fdc_api_key', '')
         config['yt_dlp_cookies_file'] = request.form.get('yt_dlp_cookies_file', '')
         config['yt_dlp_cookies_browser'] = request.form.get('yt_dlp_cookies_browser', '')
         # Checkbox: present in form data only when checked

@@ -14,6 +14,7 @@ import {
   Trash2Icon,
   DownloadIcon,
   UsersIcon,
+  UtensilsIcon,
 } from 'lucide-react'
 
 import { api } from '@/lib/api'
@@ -286,6 +287,47 @@ export function SettingsPage() {
               </Field>
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Nutrition */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <UtensilsIcon className="size-4" />
+            Nutrition lookup
+          </CardTitle>
+          <CardDescription>
+            Optional live USDA FoodData Central search when an ingredient is missing from the local table.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Field
+            label="USDA FoodData Central API Key"
+            hint={
+              <>
+                Leave blank to keep using the local table. If this field is empty, the{' '}
+                <code className="font-mono text-xs">USDA_FDC_API_KEY</code> environment variable is used instead. Get a free key at{' '}
+                <a
+                  href="https://fdc.nal.usda.gov/api-key-signup.html"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline underline-offset-2 hover:text-foreground"
+                >
+                  fdc.nal.usda.gov
+                </a>
+                . Stored in this instance&apos;s database, never in source code.
+              </>
+            }
+          >
+            <Input
+              type="password"
+              placeholder="USDA API key"
+              autoComplete="off"
+              value={get('usda_fdc_api_key')}
+              onChange={e => set('usda_fdc_api_key', e.target.value)}
+            />
+          </Field>
         </CardContent>
       </Card>
 

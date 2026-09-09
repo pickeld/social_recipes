@@ -55,5 +55,13 @@ guardrails:
     name: confirm_before_upload
     file: pipeline.py
     description: Human approval before Mealie/Tandoor write.
+  - id: recipe_schema.py::<module>::ensure_target_language#0
+    name: ensure_target_language
+    file: recipe_schema.py
+    description: Reject Chef JSON that is not in TARGET_LANGUAGE.
+  - id: url_safety.py::<module>::pin_public_http_url#0
+    name: pin_public_http_url
+    file: url_safety.py
+    description: Connect to the resolved public IP so the host cannot rebind after the SSRF check.
 
 tools: []

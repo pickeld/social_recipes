@@ -12,8 +12,10 @@ from recipe_schema import (  # noqa: E402
     RECIPE_JSON_SCHEMA,
     NotARecipeError,
     ValidationError,
+    WrongLanguageError,
     apply_yield_nutrition_guardrails,
     ensure_is_recipe,
+    ensure_target_language,
     parse_recipe_extraction,
     parse_yield_nutrition,
     recipe_dict_from_extraction,
@@ -108,6 +110,33 @@ class ParseRecipeExtractionTests(unittest.TestCase):
         self.assertEqual(data["name"], "Tomato pasta")
 
 
+class TargetLanguageTests(unittest.TestCase):
+    def test_accepts_hebrew_when_target_is_he(self):
+        extraction = parse_recipe_extraction(json.dumps(_valid_recipe(
+            name="פסטה עגבניות עם בזיליקום",
+            description="מנה פשוטה ליום חול עם רוטב עגבניות.",
+            recipeInstructions=[{"text": "מרתיחים מים במסיר גדול ומוסיפים את הפסטה."}],
+        )))
+        ensure_target_language(extraction, "he")
+
+    def test_rejects_english_when_target_is_hebrew(self):
+        extraction = parse_recipe_extraction(json.dumps(_valid_recipe(
+            name="Tomato basil pasta bake",
+            description="A simple weeknight pasta with a tomato sauce.",
+            recipeInstructions=[{"text": "Boil a large pot of water and cook the pasta."}],
+        )))
+        with self.assertRaises(WrongLanguageError):
+            ensure_target_language(extraction, "he")
+
+    def test_skips_when_sample_is_too_short(self):
+        extraction = parse_recipe_extraction(json.dumps(_valid_recipe(
+            name="Pie",
+            description="Ok.",
+            recipeInstructions=[{"text": "Mix."}],
+        )))
+        ensure_target_language(extraction, "he")
+
+
 class OpenAISchemaTests(unittest.TestCase):
     def test_strict_object_contract(self):
         self.assertEqual(RECIPE_JSON_SCHEMA.get("additionalProperties"), False)
@@ -164,16 +193,20 @@ class ChefGuardrailTests(unittest.TestCase):
         self.chef = Chef(
             source_url="https://example.com/video",
             description="",
-            transcription="Boil pasta with tomato sauce.",
+            transcription="מרתיחים פסטה עם רוטב עגבניות.",
         )
         self.chef._enrich_yield_and_nutrition = lambda recipe: recipe
 
     def test_create_recipe_from_structured_payload(self):
-        payload = _valid_recipe()
+        payload = _valid_recipe(
+            name="פסטה עגבניות ביתית עם בזיליקום",
+            description="מנה פשוטה ליום חול עם רוטב עגבניות טרי.",
+            recipeInstructions=[{"text": "מרתיחים מים במסיר גדול ומוסיפים את הפסטה."}],
+        )
         payload["recipeIngredients"][0]["unit"] = "tablespoon"
         self.chef._call_llm = lambda *args, **kwargs: json.dumps(payload)
         recipe = self.chef.create_recipe()
-        self.assertEqual(recipe["name"], "Tomato pasta")
+        self.assertEqual(recipe["name"], "פסטה עגבניות ביתית עם בזיליקום")
         self.assertEqual(recipe["@type"], "Recipe")
         self.assertEqual(recipe["recipeInstructions"][0]["@type"], "HowToStep")
         self.assertEqual(recipe["recipeIngredients"][0]["unit"], "tbsp")

@@ -8,7 +8,7 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from nutrition import lookup_recipe_nutrition, match_food  # noqa: E402
+from nutrition import _FOODS, _usda_api_key, lookup_recipe_nutrition, match_food  # noqa: E402
 from recipe_schema import parse_frame_selection, parse_visual_text  # noqa: E402
 from units import canonicalize_unit, normalize_ingredient_units, quantity_to_grams  # noqa: E402
 
@@ -66,6 +66,24 @@ class NutritionLookupTests(unittest.TestCase):
             ],
         }
         self.assertIsNone(lookup_recipe_nutrition(recipe))
+
+    def test_covers_hebrew_staples_beyond_the_original_table(self):
+        self.assertGreaterEqual(len(_FOODS), 140)
+        self.assertEqual(match_food("חציל"), "eggplant")
+        self.assertEqual(match_food("פיתה"), "pita")
+        self.assertEqual(match_food("כמון"), "cumin")
+        self.assertEqual(match_food("לאבנה"), "labneh")
+        self.assertEqual(match_food("בטטה"), "sweet potato")
+
+    def test_usda_key_comes_from_settings_not_source(self):
+        from types import ModuleType, SimpleNamespace
+        from unittest.mock import patch
+
+        dummy = ModuleType("config")
+        dummy.config = SimpleNamespace(USDA_FDC_API_KEY="settings-key")
+        with patch.dict(os.environ, {"USDA_FDC_API_KEY": "env-key"}):
+            with patch.dict(sys.modules, {"config": dummy}):
+                self.assertEqual(_usda_api_key(), "settings-key")
 
 
 class VisionSchemaTests(unittest.TestCase):

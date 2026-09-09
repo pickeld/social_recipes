@@ -1,5 +1,6 @@
 """Tests for outbound URL SSRF guards."""
 
+import json
 import os
 import socket
 import sys
@@ -9,7 +10,12 @@ from unittest.mock import MagicMock, patch
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from url_safety import UnsafeURLError, assert_public_http_url, safe_get  # noqa: E402
+from url_safety import (  # noqa: E402
+    UnsafeURLError,
+    assert_public_http_url,
+    pin_public_http_url,
+    safe_get,
+)
 from web_recipe_fetcher import download_image, fetch_web_recipe  # noqa: E402
 
 
@@ -69,10 +75,47 @@ class SafeGetRedirectTests(unittest.TestCase):
         first.status_code = 302
         first.headers = {"Location": "http://127.0.0.1/secret"}
         session = MagicMock()
+        session.adapters = {}
         session.get.return_value = first
         with patch("url_safety.socket.getaddrinfo", return_value=_public_addrinfo()):
             with self.assertRaises(UnsafeURLError):
                 safe_get(session, "https://example.com/start", timeout=5)
+
+    def test_pins_connection_to_resolved_public_ip(self):
+        session = MagicMock()
+        session.adapters = {}
+        resp = MagicMock()
+        resp.is_redirect = False
+        resp.status_code = 200
+        session.get.return_value = resp
+        with patch("url_safety.socket.getaddrinfo", return_value=_public_addrinfo()):
+            hostname, pinned, scheme = pin_public_http_url("https://example.com/recipe")
+            result = safe_get(session, "https://example.com/recipe", timeout=5)
+        self.assertEqual(hostname, "example.com")
+        self.assertEqual(pinned, "https://8.8.8.8/recipe")
+        self.assertEqual(scheme, "https")
+        self.assertIs(result, resp)
+        self.assertEqual(session.get.call_args.args[0], "https://8.8.8.8/recipe")
+        self.assertEqual(session.get.call_args.kwargs["headers"]["Host"], "example.com")
+        self.assertFalse(session.get.call_args.kwargs["allow_redirects"])
+
+    def test_relative_redirect_rejoins_original_host_then_repins(self):
+        first = MagicMock()
+        first.is_redirect = True
+        first.status_code = 302
+        first.headers = {"Location": "/next"}
+        second = MagicMock()
+        second.is_redirect = False
+        second.status_code = 200
+        session = MagicMock()
+        session.adapters = {}
+        session.get.side_effect = [first, second]
+        with patch("url_safety.socket.getaddrinfo", return_value=_public_addrinfo()):
+            safe_get(session, "https://example.com/start", timeout=5)
+        urls = [call.args[0] for call in session.get.call_args_list]
+        self.assertEqual(urls, ["https://8.8.8.8/start", "https://8.8.8.8/next"])
+        hosts = [call.kwargs["headers"]["Host"] for call in session.get.call_args_list]
+        self.assertEqual(hosts, ["example.com", "example.com"])
 
 
 class FetcherIntegrationTests(unittest.TestCase):
@@ -116,6 +159,25 @@ class InventoryTests(unittest.TestCase):
         self.assertIn("validate_public_http_url", text)
         self.assertIn("output_filter_nutrition_bounds", text)
         self.assertIn("tools: []", text)
+        self.assertIn("ensure_target_language", text)
+        self.assertIn("pin_public_http_url", text)
+
+    def test_inventory_ingests_against_the_live_tree(self):
+        from ai_inventory import ingest_ai_inventory
+
+        report = ingest_ai_inventory()
+        analysis = report["ai_inventory"]["ast_analysis"]
+        self.assertEqual(len(analysis["prompts"]), 5)
+        self.assertGreaterEqual(len(analysis["guardrails"]), 8)
+        self.assertEqual(analysis["tools"], [])
+        names = {row["name"] for row in analysis["guardrails"]}
+        self.assertIn("ensure_is_recipe", names)
+        self.assertIn("ensure_target_language", names)
+        self.assertIn("pin_public_http_url", names)
+        scan_path = os.path.join(ROOT, "ai-inventory.scan.json")
+        with open(scan_path, encoding="utf-8") as fh:
+            on_disk = json.loads(fh.read())
+        self.assertEqual(on_disk, report)
 
 
 

@@ -90,6 +90,7 @@ DEFAULT_CONFIG = {
     "whisper_model": "small",
     "confirm_before_upload": "true",
     "hf_token": "",
+    "usda_fdc_api_key": "",
     "yt_dlp_cookies_file": "",
     "yt_dlp_cookies_browser": "",
     "max_concurrent_jobs": "3",
@@ -261,6 +262,18 @@ class Config:
     @property
     def HF_TOKEN(self) -> str:
         return self._get('hf_token', DEFAULT_CONFIG['hf_token'])
+
+    @property
+    def USDA_FDC_API_KEY(self) -> str:
+        """USDA FoodData Central key from Settings, else USDA_FDC_API_KEY env.
+
+        Never hardcoded. Empty Settings falls through to the environment so
+        Docker operators can keep using env-only configuration.
+        """
+        stored = self._get('usda_fdc_api_key', DEFAULT_CONFIG['usda_fdc_api_key'])
+        if stored:
+            return stored
+        return (os.environ.get('USDA_FDC_API_KEY') or '').strip()
 
     @property
     def YT_DLP_COOKIES_FILE(self) -> str:
