@@ -1,0 +1,59 @@
+# Pick-a-Recipe Chef harness — named assets for Lucy / agent-bom.
+#
+# Pipeline steps (yt-dlp, Whisper, Mealie/Tandoor upload) are application
+# code, not LLM tools. Do not inventory them as tools.
+#
+# source_id values follow Crucible's file::scope::name#occurrence shape.
+
+harness:
+  id: pick-a-recipe.chef
+  root: chef.py::Chef#0
+  description: Linear download/transcribe/normalize pipeline. Not a ReAct agent.
+
+prompts:
+  - id: helpers.py::<module>::get_recipe_system_prompt#0
+    name: get_recipe_system_prompt
+    file: helpers.py
+    used_by: chef.py::Chef.create_recipe
+  - id: helpers.py::<module>::get_web_recipe_system_prompt#0
+    name: get_web_recipe_system_prompt
+    file: helpers.py
+    used_by: chef.py::Chef.create_recipe_from_web_content
+  - id: helpers.py::<module>::get_yield_nutrition_prompt#0
+    name: get_yield_nutrition_prompt
+    file: helpers.py
+    used_by: chef.py::Chef._enrich_yield_and_nutrition
+  - id: transcriber.py::Transcriber::_get_visual_text_prompt#0
+    name: _get_visual_text_prompt
+    file: transcriber.py
+    used_by: transcriber.py::Transcriber.extract_visual_text
+  - id: llm_providers/base.py::LLMImageSelector::_get_selection_prompt#0
+    name: _get_selection_prompt
+    file: llm_providers/base.py
+    used_by: llm_providers.openai.OpenAIImageSelector.select_best_frame
+
+guardrails:
+  - id: recipe_schema.py::<module>::ensure_is_recipe#0
+    name: ensure_is_recipe
+    file: recipe_schema.py
+    description: Reject sources that are not a recipe instead of inventing one.
+  - id: recipe_schema.py::<module>::output_filter_nutrition_bounds#0
+    name: output_filter_nutrition_bounds
+    file: recipe_schema.py
+    description: output_filter for calories/macros/times outside plausible bounds.
+  - id: recipe_schema.py::<module>::apply_yield_nutrition_guardrails#0
+    name: apply_yield_nutrition_guardrails
+    file: recipe_schema.py
+  - id: url_safety.py::<module>::validate_public_http_url#0
+    name: validate_public_http_url
+    file: url_safety.py
+    description: SSRF output_filter — public http(s) 80/443 only, including video URLs.
+  - id: url_safety.py::<module>::assert_public_http_url#0
+    name: assert_public_http_url
+    file: url_safety.py
+  - id: pipeline.py::<module>::CONFIRM_BEFORE_UPLOAD
+    name: confirm_before_upload
+    file: pipeline.py
+    description: Human approval before Mealie/Tandoor write.
+
+tools: []

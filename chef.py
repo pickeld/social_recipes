@@ -19,6 +19,8 @@ from recipe_schema import (
     parse_yield_nutrition,
     recipe_dict_from_extraction,
 )
+from nutrition import lookup_recipe_nutrition
+from units import normalize_ingredient_units
 
 logger = setup_logger(__name__)
 
@@ -188,6 +190,7 @@ class Chef:
         # Store structured ingredients
         data["recipeIngredients"] = clean
         logger.info(f"[Chef] Processed {len(clean)} ingredients")
+        normalize_ingredient_units(clean)
 
         # Create Schema.org recipeIngredient (flattened strings) for compatibility
         flattened = []
@@ -332,6 +335,13 @@ class Chef:
         need_cook_time = not str(recipe.get("cookTime") or "").strip()
         need_total_time = not str(recipe.get("totalTime") or "").strip()
 
+        if need_nutrition and recipe.get("recipeYield"):
+            looked = lookup_recipe_nutrition(recipe)
+            if looked:
+                recipe["nutrition"] = looked
+                need_nutrition = False
+                logger.info("[Chef] Nutrition from local/USDA table: %s", looked)
+
         if not (need_yield or need_nutrition or need_prep_time or need_cook_time or need_total_time):
             return recipe
 
@@ -376,5 +386,10 @@ class Chef:
         if recipe.get("nutrition"):
             logger.info(f"[Chef] Added nutrition to recipe: {recipe['nutrition']}")
         elif need_nutrition:
-            logger.warning("[Chef] Nutrition dict had no valid fields")
+            looked = lookup_recipe_nutrition(recipe)
+            if looked:
+                recipe["nutrition"] = looked
+                logger.info("[Chef] Nutrition from local/USDA table after yield: %s", looked)
+            else:
+                logger.warning("[Chef] Nutrition dict had no valid fields")
         return recipe

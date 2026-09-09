@@ -7,6 +7,11 @@ from faster_whisper import WhisperModel
 from config import config
 from helpers import setup_logger
 from llm_resilience import call_with_model_fallback
+from recipe_schema import (
+    VISUAL_JSON_SCHEMA,
+    VisualTextExtraction,
+    parse_visual_text,
+)
 
 logger = setup_logger(__name__)
 
@@ -247,10 +252,14 @@ class Transcriber:
                         ],
                     ),
                 ],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=VisualTextExtraction,
+                ),
             )
 
         response, _ = call_with_model_fallback("gemini", config.GEMINI_MODEL, _call)
-        return response.text or ""
+        return _plain_visual_text(response.text or "")
 
     def _extract_visual_text_openai(self) -> str:
         """Extract visual text using OpenAI's vision API with extracted frames."""
@@ -290,11 +299,19 @@ class Transcriber:
                             *image_contents
                         ]
                     }
-                ]
+                ],
+                text={
+                    "format": {
+                        "type": "json_schema",
+                        "name": "visual_text",
+                        "strict": True,
+                        "schema": VISUAL_JSON_SCHEMA,
+                    }
+                },
             )
 
         response, _ = call_with_model_fallback("openai", config.OPENAI_MODEL, _call)
-        return response.output_text or ""
+        return _plain_visual_text(response.output_text or "")
 
     def _extract_frames(self, num_frames: int = 8) -> list[str]:
         """Extract evenly-spaced frames from video using ffmpeg."""
@@ -342,7 +359,6 @@ class Transcriber:
 
     def _get_visual_text_prompt(self) -> str:
         """Get the prompt for visual text extraction."""
-        # Map language codes to full names for clearer prompts
         lang_names = {
             "he": "Hebrew",
             "en": "English",
@@ -365,7 +381,18 @@ This includes:
 - Any overlay text, annotations, or labels
 - Timer displays or temperatures
 
-Return ONLY the extracted text, organized logically.
+Return a JSON object with:
+- "title": recipe name or empty string
+- "ingredients_text": ingredient lines, one per line (empty if none)
+- "instructions_text": cooking steps (empty if none)
+- "other_text": any remaining on-screen text
 If text appears multiple times, include it once.
-Format ingredient lists clearly with quantities and measurements.
 Output the text in {target_lang} language. If the original text is in a different language, translate it to {target_lang}."""
+
+
+def _plain_visual_text(raw: str) -> str:
+    """Prefer structured OCR JSON; fall back to the raw model text."""
+    try:
+        return parse_visual_text(raw).as_plain_text() or raw
+    except Exception:
+        return raw

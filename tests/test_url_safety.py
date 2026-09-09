@@ -80,8 +80,43 @@ class FetcherIntegrationTests(unittest.TestCase):
         with self.assertRaises(UnsafeURLError):
             fetch_web_recipe("http://127.0.0.1/recipe")
 
-    def test_download_image_returns_none_for_private_url(self):
-        self.assertIsNone(download_image("http://192.168.0.2/dish.jpg", "/tmp"))
+    def test_pipeline_rejects_loopback_before_download(self):
+        import sys
+        from unittest.mock import MagicMock
+
+        for name in (
+            "faster_whisper", "yt_dlp", "yt_dlp.utils",
+            "openai", "google.genai", "google.genai.types",
+        ):
+            sys.modules.setdefault(name, MagicMock())
+
+        from pipeline import run_url_pipeline
+
+        class Reporter:
+            def is_cancelled(self):
+                return False
+
+            def update(self, *args, **kwargs):
+                pass
+
+        result = run_url_pipeline("http://127.0.0.1/video", Reporter())
+        self.assertIsNotNone(result.error)
+        self.assertRegex(result.error, r"non-public|not allowed")
+
+
+class InventoryTests(unittest.TestCase):
+    def test_harness_inventory_lists_prompts_and_guardrails(self):
+        path = os.path.join(ROOT, "ai-inventory.yaml")
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        self.assertIn("get_recipe_system_prompt", text)
+        self.assertIn("get_web_recipe_system_prompt", text)
+        self.assertIn("get_yield_nutrition_prompt", text)
+        self.assertIn("ensure_is_recipe", text)
+        self.assertIn("validate_public_http_url", text)
+        self.assertIn("output_filter_nutrition_bounds", text)
+        self.assertIn("tools: []", text)
+
 
 
 if __name__ == "__main__":

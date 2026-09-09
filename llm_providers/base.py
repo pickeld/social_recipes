@@ -36,13 +36,16 @@ Select the frame that best:
 
 PRIORITY: Choose the image that someone could look at and immediately understand "this is [dish name]". The image should capture the essence and identity of the dish.
 
-Respond with ONLY the number (0-{num_frames - 1}) of the best frame.
-If none show a finished dish, pick the frame that best describes what food is being made.
-Just respond with the single number, nothing else."""
+Return JSON {{"index": N}} where N is the 0-based frame number (0-{num_frames - 1}).
+If none show a finished dish, pick the frame that best describes what food is being made."""
 
     def _parse_selection_response(self, response: str, max_idx: int) -> int | None:
         """Parse LLM response to get frame index."""
-        # Find first number in response
+        from recipe_schema import parse_frame_selection
+
+        structured = parse_frame_selection(response, max_idx)
+        if structured is not None:
+            return structured
         match = re.search(r"\d+", response.strip())
         if match:
             idx = int(match.group())

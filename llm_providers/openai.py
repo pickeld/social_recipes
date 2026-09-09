@@ -50,9 +50,19 @@ class OpenAIImageSelector(LLMImageSelector):
         image_contents.append({"type": "text", "text": prompt})
 
         def _call(model: str):
+            from recipe_schema import FRAME_JSON_SCHEMA
+
             return client.responses.create(
                 model=model,
-                input=[{"role": "user", "content": image_contents}]
+                input=[{"role": "user", "content": image_contents}],
+                text={
+                    "format": {
+                        "type": "json_schema",
+                        "name": "frame_selection",
+                        "strict": True,
+                        "schema": FRAME_JSON_SCHEMA,
+                    }
+                },
             )
 
         try:

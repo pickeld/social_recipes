@@ -169,11 +169,14 @@ class ChefGuardrailTests(unittest.TestCase):
         self.chef._enrich_yield_and_nutrition = lambda recipe: recipe
 
     def test_create_recipe_from_structured_payload(self):
-        self.chef._call_llm = lambda *args, **kwargs: json.dumps(_valid_recipe())
+        payload = _valid_recipe()
+        payload["recipeIngredients"][0]["unit"] = "tablespoon"
+        self.chef._call_llm = lambda *args, **kwargs: json.dumps(payload)
         recipe = self.chef.create_recipe()
         self.assertEqual(recipe["name"], "Tomato pasta")
         self.assertEqual(recipe["@type"], "Recipe")
         self.assertEqual(recipe["recipeInstructions"][0]["@type"], "HowToStep")
+        self.assertEqual(recipe["recipeIngredients"][0]["unit"], "tbsp")
 
     def test_create_recipe_rejects_non_recipe(self):
         payload = _valid_recipe(

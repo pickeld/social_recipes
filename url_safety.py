@@ -59,6 +59,11 @@ def _iter_resolved_ips(host: str):
     return ips
 
 
+def validate_public_http_url(url: str) -> str:
+    """Guardrail alias for assert_public_http_url (stable name for inventory)."""
+    return assert_public_http_url(url)
+
+
 def assert_public_http_url(url: str) -> str:
     """Raise UnsafeURLError unless ``url`` is a public http(s) URL.
 

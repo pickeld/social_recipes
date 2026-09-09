@@ -90,6 +90,35 @@ class YieldNutritionEstimate(BaseModel):
     nutrition: NutritionEstimate
 
 
+class VisualTextExtraction(BaseModel):
+    """On-screen OCR payload from the vision LLM."""
+
+    model_config = ConfigDict(extra="forbid")
+    title: str
+    ingredients_text: str
+    instructions_text: str
+    other_text: str
+
+    def as_plain_text(self) -> str:
+        parts = []
+        if self.title.strip():
+            parts.append(self.title.strip())
+        if self.ingredients_text.strip():
+            parts.append(self.ingredients_text.strip())
+        if self.instructions_text.strip():
+            parts.append(self.instructions_text.strip())
+        if self.other_text.strip():
+            parts.append(self.other_text.strip())
+        return "\n\n".join(parts)
+
+
+class FrameSelection(BaseModel):
+    """Index of the best dish frame among vision candidates."""
+
+    model_config = ConfigDict(extra="forbid")
+    index: int
+
+
 def extract_json(text: str) -> str:
     """Strip markdown fences so a JSON object remains."""
     if not text:
@@ -148,6 +177,8 @@ def to_openai_json_schema(model: type[BaseModel]) -> dict:
 
 RECIPE_JSON_SCHEMA = to_openai_json_schema(RecipeExtraction)
 NUTRITION_JSON_SCHEMA = to_openai_json_schema(YieldNutritionEstimate)
+VISUAL_JSON_SCHEMA = to_openai_json_schema(VisualTextExtraction)
+FRAME_JSON_SCHEMA = to_openai_json_schema(FrameSelection)
 
 
 def parse_model(text: str, model: type[BaseModel]) -> BaseModel:
@@ -172,6 +203,23 @@ def parse_yield_nutrition(text: str) -> YieldNutritionEstimate:
     estimate = parse_model(text, YieldNutritionEstimate)
     assert isinstance(estimate, YieldNutritionEstimate)
     return estimate
+
+
+def parse_visual_text(text: str) -> VisualTextExtraction:
+    extraction = parse_model(text, VisualTextExtraction)
+    assert isinstance(extraction, VisualTextExtraction)
+    return extraction
+
+
+def parse_frame_selection(text: str, max_idx: int) -> int | None:
+    try:
+        selection = parse_model(text, FrameSelection)
+    except (json.JSONDecodeError, ValidationError, ValueError):
+        return None
+    assert isinstance(selection, FrameSelection)
+    if 0 <= selection.index < max_idx:
+        return selection.index
+    return None
 
 
 def recipe_dict_from_extraction(extraction: RecipeExtraction) -> dict[str, Any]:
@@ -241,6 +289,11 @@ def sanitize_nutrition_fields(nutrition: dict) -> dict:
     return cleaned
 
 
+def output_filter_nutrition_bounds(nutrition: dict) -> dict:
+    """LLM output_filter: drop nutrition fields outside plausible bounds."""
+    return sanitize_nutrition_fields(nutrition)
+
+
 def apply_yield_nutrition_guardrails(
     recipe: dict,
     estimate: YieldNutritionEstimate,
@@ -277,7 +330,7 @@ def apply_yield_nutrition_guardrails(
             recipe["totalTime"] = total
 
     if need_nutrition:
-        nutrition = sanitize_nutrition_fields(estimate.nutrition.model_dump())
+        nutrition = output_filter_nutrition_bounds(estimate.nutrition.model_dump())
         if any(k in nutrition for k in NUTRITION_BOUNDS):
             recipe["nutrition"] = nutrition
 

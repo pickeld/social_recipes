@@ -21,6 +21,7 @@ from uploaders import (
     get_enabled_targets,
     upload_recipe_to_targets,
 )
+from url_safety import UnsafeURLError, assert_public_http_url
 from video_downloader import VideoDownloader
 from web_recipe_fetcher import is_video_url, fetch_web_recipe, download_image
 
@@ -85,6 +86,7 @@ def run_extraction_pipeline(
     stats = stats or PipelineStats()
 
     try:
+        assert_public_http_url(url)
         config.reload()
 
         if reporter.is_cancelled():
@@ -268,6 +270,7 @@ def run_web_recipe_pipeline(
     stats = stats or PipelineStats()
 
     try:
+        assert_public_http_url(url)
         config.reload()
 
         if reporter.is_cancelled():
@@ -408,6 +411,10 @@ def run_url_pipeline(
     skip_upload: bool = False,
 ) -> PipelineResult:
     """Auto-detect URL type and route to the appropriate pipeline."""
+    try:
+        assert_public_http_url(url)
+    except UnsafeURLError as exc:
+        return PipelineResult(error=f"Error: {exc}")
     if is_video_url(url):
         return run_extraction_pipeline(
             url,
