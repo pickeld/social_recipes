@@ -1,0 +1,26 @@
+{
+  "id": "web-he-text",
+  "kind": "web",
+  "language": "he",
+  "packet": {
+    "source_url": "https://example.com/recipes/hummus",
+    "page_text": "חומוס ביתי. 400 גרם גרגרים, 2 כפות טחינה, שום ולימון. טוחנים הכל עד שזה חלק."
+  },
+  "expected": {
+    "is_recipe": true,
+    "rejection_reason": "",
+    "name": "חומוס ביתי מגרגרי חומוס",
+    "description": "חומוס חלק מגרגרים, טחינה, שום ולימון לפי הטקסט בעמוד.",
+    "datePublished": "2026-01-01",
+    "recipeYield": "6 מנות",
+    "recipeInstructions": [
+      {"text": "טוחנים גרגרים עם טחינה שום ולימון עד שהממרח חלק."}
+    ],
+    "recipeIngredients": [
+      {"food": "גרגרים", "quantity": "400", "unit": "גרם", "notes": "", "raw": "400 גרם גרגרים"},
+      {"food": "טחינה", "quantity": "2", "unit": "כפות", "notes": "", "raw": "2 כפות טחינה"},
+      {"food": "שום", "quantity": "", "unit": "", "notes": "", "raw": "שום"},
+      {"food": "לימון", "quantity": "", "unit": "", "notes": "", "raw": "לימון"}
+    ]
+  }
+}

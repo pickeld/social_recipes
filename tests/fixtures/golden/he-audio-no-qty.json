@@ -1,0 +1,27 @@
+{
+  "id": "he-audio-no-qty",
+  "kind": "video",
+  "language": "he",
+  "expect_empty_quantities": true,
+  "packet": {
+    "source_url": "https://example.com/video/audio-only",
+    "description": "",
+    "on_screen_text": "",
+    "audio_transcript": "תוסיפו קמח ומים ותערבבו עד שהבצק רך. אין כמויות על המסך."
+  },
+  "expected": {
+    "is_recipe": true,
+    "rejection_reason": "",
+    "name": "בצק פשוט מקמח ומים",
+    "description": "בצק בסיסי מקמח ומים בלי כמויות מדויקות במקור.",
+    "datePublished": "2026-01-01",
+    "recipeYield": "",
+    "recipeInstructions": [
+      {"text": "מערבבים קמח ומים עד שהבצק רך ואחיד."}
+    ],
+    "recipeIngredients": [
+      {"food": "קמח", "quantity": "", "unit": "", "notes": "", "raw": "קמח"},
+      {"food": "מים", "quantity": "", "unit": "", "notes": "", "raw": "מים"}
+    ]
+  }
+}

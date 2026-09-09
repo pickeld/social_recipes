@@ -144,17 +144,11 @@ def run_extraction_pipeline(
                 visual_text = transcriber.extract_visual_text()
                 with open(visual_cache, "w", encoding="utf-8") as f:
                     f.write(visual_text)
-                stats.add_text(visual_text)
             except Exception as exc:
                 reporter.update("visual", f"Warning: Could not extract visual text: {exc}", 60)
-        reporter.update("visual", "Visual text extracted", 65)
-
-        combined_transcription = transcription
         if visual_text:
-            combined_transcription = (
-                f"=== AUDIO TRANSCRIPTION ===\n{transcription}\n\n"
-                f"=== ON-SCREEN TEXT (ingredients, instructions, etc.) ===\n{visual_text}"
-            )
+            stats.add_text(visual_text)
+        reporter.update("visual", "Visual text extracted", 65)
 
         if reporter.is_cancelled():
             return PipelineResult(error="cancelled")
@@ -190,8 +184,12 @@ def run_extraction_pipeline(
         reporter.update("evaluate", "Creating recipe with AI...", 85)
         from chef import Chef
 
-        chef = Chef(source_url=url, description=description, transcription=combined_transcription)
-        stats.add_text(combined_transcription)
+        chef = Chef(
+            source_url=url,
+            description=description,
+            transcription=transcription,
+            visual_text=visual_text,
+        )
         recipe_data = chef.create_recipe()
         if not recipe_data:
             return PipelineResult(error="Failed to create recipe", llm_tokens_estimate=stats.llm_tokens_estimate)

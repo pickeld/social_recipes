@@ -22,7 +22,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { JobCard } from '@/components/job-card'
-import { RecipeView } from '@/components/recipe-view'
+import { RecipeEditForm } from '@/components/recipe-edit-form'
 import { ImagePicker } from '@/components/image-picker'
 import { api } from '@/lib/api'
 import { useSocketEvent, useTransitionEvent } from '@/lib/socket'
@@ -30,6 +30,7 @@ import { useSession } from '@/hooks/use-session'
 import type {
   Job,
   PendingUpload,
+  RecipeData,
   JobProgressPayload,
   JobCompletePayload,
   JobFailedPayload,
@@ -40,6 +41,7 @@ interface PreviewState {
   uploadId: string
   pendingUpload: PendingUpload
   selectedImageIndex: number
+  recipe: RecipeData
 }
 
 function isValidUrl(s: string): boolean {
@@ -108,6 +110,7 @@ export function HomePage() {
       uploadId: upload.upload_id,
       pendingUpload: upload,
       selectedImageIndex: upload.best_image_index,
+      recipe: structuredClone(upload.recipe),
     })
   }, [])
 
@@ -249,10 +252,16 @@ export function HomePage() {
     mutationFn: ({
       uploadId,
       selectedIndex,
+      recipe,
     }: {
       uploadId: string
       selectedIndex: number
-    }) => api.confirmPendingUpload(uploadId, selectedIndex),
+      recipe: RecipeData
+    }) =>
+      api.confirmPendingUpload(uploadId, {
+        selected_image_index: selectedIndex,
+        recipe,
+      }),
     onSuccess: () => {
       setPreviewState(null)
       void queryClient.invalidateQueries({ queryKey: ['pending-uploads'] })
@@ -486,7 +495,12 @@ export function HomePage() {
                   }
                 />
               )}
-              <RecipeView recipe={previewState.pendingUpload.recipe} />
+              <RecipeEditForm
+                recipe={previewState.recipe}
+                onChange={(recipe) =>
+                  setPreviewState((s) => (s ? { ...s, recipe } : s))
+                }
+              />
             </div>
           )}
 
@@ -508,6 +522,7 @@ export function HomePage() {
                   confirmUploadMutation.mutate({
                     uploadId: previewState.uploadId,
                     selectedIndex: previewState.selectedImageIndex,
+                    recipe: previewState.recipe,
                   })
                 }
               }}

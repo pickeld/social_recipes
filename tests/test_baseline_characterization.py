@@ -135,6 +135,23 @@ class TestPendingUploads(unittest.TestCase):
         self.assertEqual(item['status'], 'pending')
         self.assertEqual(item['output_target'], 'mealie')
 
+    def test_update_recipe_only_while_pending(self):
+        from database import (
+            confirm_pending_upload,
+            get_pending_upload,
+            update_pending_upload_recipe,
+        )
+        upload_id = self._mk()
+        self.assertTrue(
+            update_pending_upload_recipe(upload_id, {'name': 'Edited Dish'})
+        )
+        self.assertEqual(get_pending_upload(upload_id)['recipe_data']['name'], 'Edited Dish')
+        self.assertTrue(confirm_pending_upload(upload_id))
+        self.assertFalse(
+            update_pending_upload_recipe(upload_id, {'name': 'Too late'})
+        )
+        self.assertEqual(get_pending_upload(upload_id)['recipe_data']['name'], 'Edited Dish')
+
     def test_confirm_is_one_shot(self):
         from database import confirm_pending_upload, get_pending_upload
         upload_id = self._mk()

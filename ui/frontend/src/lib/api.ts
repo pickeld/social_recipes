@@ -191,17 +191,25 @@ export const api = {
       `/api/pending-uploads/${encodeURIComponent(uploadId)}`,
     ),
 
-  confirmPendingUpload: (uploadId: string, selectedImageIndex?: number | null) =>
-    request<{ status: string; upload_id: string; job_id: string }>(
+  confirmPendingUpload: (
+    uploadId: string,
+    opts?: {
+      selected_image_index?: number | null
+      recipe?: import('@/types').RecipeData
+    },
+  ) => {
+    const json: Record<string, unknown> = {}
+    if (opts?.selected_image_index !== undefined && opts.selected_image_index !== null) {
+      json.selected_image_index = opts.selected_image_index
+    }
+    if (opts?.recipe) {
+      json.recipe = opts.recipe
+    }
+    return request<{ status: string; upload_id: string; job_id: string }>(
       `/api/pending-uploads/${encodeURIComponent(uploadId)}/confirm`,
-      {
-        method: 'POST',
-        json:
-          selectedImageIndex !== undefined && selectedImageIndex !== null
-            ? { selected_image_index: selectedImageIndex }
-            : {},
-      },
-    ),
+      { method: 'POST', json },
+    )
+  },
 
   cancelPendingUpload: (uploadId: string) =>
     request<{ status: string; upload_id: string; job_id: string }>(

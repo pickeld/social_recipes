@@ -1,0 +1,21 @@
+{
+  "id": "he-not-a-recipe",
+  "kind": "video",
+  "language": "he",
+  "packet": {
+    "source_url": "https://example.com/video/vlog",
+    "description": "טיול בתל אביב",
+    "on_screen_text": "יום כיף בים",
+    "audio_transcript": "היום הלכנו לטייל בעיר ואכלנו במסעדה. אין מתכון."
+  },
+  "expected": {
+    "is_recipe": false,
+    "rejection_reason": "This is a travel vlog with no cooking steps or ingredients.",
+    "name": "",
+    "description": "",
+    "datePublished": "",
+    "recipeYield": "",
+    "recipeInstructions": [],
+    "recipeIngredients": []
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "id": "en-not-a-recipe",
+  "kind": "video",
+  "language": "en",
+  "packet": {
+    "source_url": "https://example.com/video/unboxing",
+    "description": "New headphones",
+    "on_screen_text": "Unboxing day",
+    "audio_transcript": "Today we open a gadget box. No cooking here at all."
+  },
+  "expected": {
+    "is_recipe": false,
+    "rejection_reason": "Product unboxing video with no ingredients or cooking steps.",
+    "name": "",
+    "description": "",
+    "datePublished": "",
+    "recipeYield": "",
+    "recipeInstructions": [],
+    "recipeIngredients": []
+  }
+}

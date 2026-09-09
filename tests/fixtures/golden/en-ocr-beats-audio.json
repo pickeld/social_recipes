@@ -1,0 +1,28 @@
+{
+  "id": "en-ocr-beats-audio",
+  "kind": "video",
+  "language": "en",
+  "assert_quantity": ["flour", "200"],
+  "packet": {
+    "source_url": "https://example.com/video/flour-conflict",
+    "description": "",
+    "on_screen_text": "Pancakes\n200 g flour\n2 eggs\nMix and fry.",
+    "audio_transcript": "Dump in like 500 grams of flour, maybe more."
+  },
+  "expected": {
+    "is_recipe": true,
+    "rejection_reason": "",
+    "name": "Simple pancakes",
+    "description": "Pancakes mixed and fried using the amounts shown on screen.",
+    "datePublished": "2026-01-01",
+    "recipeYield": "4 servings",
+    "recipeInstructions": [
+      {"text": "Mix the flour and eggs into a batter."},
+      {"text": "Fry spoons of batter until both sides are golden."}
+    ],
+    "recipeIngredients": [
+      {"food": "flour", "quantity": "200", "unit": "g", "notes": "", "raw": "200 g flour"},
+      {"food": "egg", "quantity": "2", "unit": "", "notes": "", "raw": "2 eggs"}
+    ]
+  }
+}

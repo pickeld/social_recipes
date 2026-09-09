@@ -26,8 +26,175 @@ from units import normalize_ingredient_units
 logger = setup_logger(__name__)
 
 
+class RecipeEditError(ValueError):
+    """User-edited preview JSON is not a usable recipe."""
+
+
+def build_recipe_user_payload(
+    *,
+    source_url: str | None,
+    description: str,
+    audio_transcript: str,
+    visual_text: str = "",
+    previous_attempt_error: str | None = None,
+) -> dict[str, Any]:
+    """Packet Chef sends the model. On-screen text outranks audio on conflict."""
+    payload: dict[str, Any] = {
+        "source_url": source_url,
+        "description": description or "",
+        "on_screen_text": visual_text or "",
+        "audio_transcript": audio_transcript or "",
+        "quantity_rule": (
+            "Prefer on_screen_text for ingredients and quantities. "
+            "Use audio_transcript only to fill gaps. "
+            "Never invent a quantity or unit; use empty strings if not clearly present."
+        ),
+    }
+    if previous_attempt_error:
+        payload["previous_attempt_error"] = previous_attempt_error
+        payload["correction_hint"] = (
+            "Fix the JSON, schema, or language issue in previous_attempt_error. "
+            "Do not invent quantities to make the recipe look complete."
+        )
+    return payload
+
+
+def postprocess_recipe(data: dict, source_url: str | None) -> dict:
+    """Normalize a Recipe dict for upload (also used when the user edits preview)."""
+    data.setdefault("@context", "https://schema.org")
+    data.setdefault("@type", "Recipe")
+    data.setdefault("url", source_url or "")
+    data.setdefault("video", {"@type": "VideoObject", "url": source_url or data.get("url") or ""})
+
+    dp = data.get("datePublished")
+    if not isinstance(dp, str) or len(dp) <= 10:
+        data["datePublished"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    ingredients = data.get("recipeIngredients") or []
+    clean = []
+    seen_foods: dict[str, int] = {}
+
+    for i in ingredients:
+        if not isinstance(i, dict):
+            continue
+        food = " ".join(str(i.get("food", "")).split()).strip()
+        qty = " ".join(str(i.get("quantity", "")).split()).strip()
+        unit = " ".join(str(i.get("unit", "")).split()).strip()
+        notes = " ".join(str(i.get("notes", "")).split()).strip()
+        raw_from_llm = (i.get("raw") or "").strip()
+        if not food:
+            continue
+
+        food_key = food.casefold()
+        raw_line = raw_from_llm or " ".join(p for p in [qty, unit, food, notes] if p).strip()
+
+        if food_key in seen_foods:
+            existing_idx = seen_foods[food_key]
+            existing = clean[existing_idx]
+
+            if existing["quantity"] == qty and existing["unit"] == unit:
+                if notes and notes not in existing["notes"]:
+                    if existing["notes"]:
+                        existing["notes"] = f"{existing['notes']}, {notes}"
+                    else:
+                        existing["notes"] = notes
+            elif qty and existing["quantity"]:
+                try:
+                    existing_num = float(existing["quantity"].replace(",", "."))
+                    new_num = float(qty.replace(",", "."))
+                    if existing["unit"] == unit:
+                        total = existing_num + new_num
+                        existing["quantity"] = str(int(total) if total == int(total) else total)
+                        if notes and notes not in existing["notes"]:
+                            if existing["notes"]:
+                                existing["notes"] = f"{existing['notes']}, {notes}"
+                            else:
+                                existing["notes"] = notes
+                    else:
+                        clean.append({"food": food, "quantity": qty, "unit": unit, "notes": notes, "raw": raw_line})
+                except ValueError:
+                    clean.append({"food": food, "quantity": qty, "unit": unit, "notes": notes, "raw": raw_line})
+            else:
+                clean.append({"food": food, "quantity": qty, "unit": unit, "notes": notes, "raw": raw_line})
+        else:
+            seen_foods[food_key] = len(clean)
+            clean.append({"food": food, "quantity": qty, "unit": unit, "notes": notes, "raw": raw_line})
+
+    data["recipeIngredients"] = clean
+    logger.info(f"[Chef] Processed {len(clean)} ingredients")
+    normalize_ingredient_units(clean)
+
+    flattened = []
+    for i in clean:
+        parts = [i["quantity"], i["unit"], i["food"], i.get("notes", "")]
+        line = " ".join(p for p in parts if p).strip().replace("–", "-")
+        if line:
+            flattened.append(line)
+    data["recipeIngredient"] = flattened
+
+    steps = data.get("recipeInstructions") or []
+    clean_steps = []
+    for step in steps:
+        if isinstance(step, dict):
+            text = str(step.get("text", "")).strip()
+        else:
+            text = str(step).strip()
+        if text:
+            clean_steps.append({"@type": "HowToStep", "text": text})
+    data["recipeInstructions"] = clean_steps
+
+    if not str(data.get("recipeYield") or "").strip():
+        data.pop("recipeYield", None)
+
+    return data
+
+
+def apply_confirmed_recipe(existing: dict, patch: dict) -> dict:
+    """Merge a preview edit onto the stored recipe and re-normalize."""
+    if not isinstance(patch, dict):
+        raise RecipeEditError("Recipe must be a JSON object")
+    merged = dict(existing or {})
+    if "name" in patch:
+        merged["name"] = str(patch.get("name") or "").strip()
+    if "description" in patch:
+        merged["description"] = str(patch.get("description") or "").strip()
+    if "recipeYield" in patch:
+        merged["recipeYield"] = str(patch.get("recipeYield") or "").strip()
+    if "recipeIngredients" in patch:
+        if not isinstance(patch["recipeIngredients"], list):
+            raise RecipeEditError("Ingredients must be a list")
+        merged["recipeIngredients"] = patch["recipeIngredients"]
+    if "recipeInstructions" in patch:
+        if not isinstance(patch["recipeInstructions"], list):
+            raise RecipeEditError("Instructions must be a list")
+        merged["recipeInstructions"] = patch["recipeInstructions"]
+
+    result = postprocess_recipe(merged, merged.get("url") or existing.get("url"))
+    name = str(result.get("name") or "").strip()
+    ings = result.get("recipeIngredients") or []
+    steps = result.get("recipeInstructions") or []
+    if not name:
+        raise RecipeEditError("Recipe needs a name")
+    if not ings and not steps:
+        raise RecipeEditError("Recipe needs ingredients or steps")
+    looked = lookup_recipe_nutrition(result)
+    if looked:
+        result["nutrition"] = looked
+    else:
+        result.pop("nutrition", None)
+    return result
+
+
 class Chef:
-    def __init__(self, source_url: str, description: str, transcription: str, *, model: str | None = None):
+    def __init__(
+        self,
+        source_url: str,
+        description: str,
+        transcription: str,
+        *,
+        visual_text: str = "",
+        model: str | None = None,
+    ):
         logger.info("[AI Recipe] Initializing Chef...")
         self.provider = config.LLM_PROVIDER
         
@@ -48,7 +215,11 @@ class Chef:
         self.source_url = source_url
         self.description = description
         self.transcription = transcription
-        logger.info(f"[AI Recipe] Chef initialized. Transcription length: {len(transcription)} chars")
+        self.visual_text = visual_text or ""
+        logger.info(
+            f"[AI Recipe] Chef initialized. Audio {len(transcription)} chars, "
+            f"on-screen {len(self.visual_text)} chars"
+        )
 
     def _call_llm(
         self,
@@ -118,113 +289,16 @@ class Chef:
         return result
 
     def _postprocess_recipe(self, data: dict, source_url: str | None) -> dict:
-        data.setdefault("@context", "https://schema.org")
-        data.setdefault("@type", "Recipe")
-        data.setdefault("url", source_url or self.source_url)
-        data.setdefault("video", {"@type": "VideoObject", "url": source_url or self.source_url})
-
-        # Ensure valid date
-        dp = data.get("datePublished")
-        if not isinstance(dp, str) or len(dp) <= 10:
-            data["datePublished"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-        # --- Clean and deduplicate recipeIngredients ---
-        ingredients = data.get("recipeIngredients") or []
-        clean = []
-        seen_foods: dict[str, int] = {}  # Map food name (casefolded) to index in clean list
-        
-        for i in ingredients:
-            if not isinstance(i, dict):
-                continue
-            food = " ".join(str(i.get("food", "")).split()).strip()
-            qty = " ".join(str(i.get("quantity", "")).split()).strip()
-            unit = " ".join(str(i.get("unit", "")).split()).strip()
-            notes = " ".join(str(i.get("notes", "")).split()).strip()
-            raw_from_llm = (i.get("raw") or "").strip()
-            if not food:
-                continue
-            
-            food_key = food.casefold()
-            # Generate raw line for display (use LLM-provided raw if available)
-            raw_line = raw_from_llm or " ".join(p for p in [qty, unit, food, notes] if p).strip()
-            
-            if food_key in seen_foods:
-                # Merge duplicate: combine quantities or notes
-                existing_idx = seen_foods[food_key]
-                existing = clean[existing_idx]
-                
-                # If same quantity and unit, just merge notes
-                if existing["quantity"] == qty and existing["unit"] == unit:
-                    if notes and notes not in existing["notes"]:
-                        if existing["notes"]:
-                            existing["notes"] = f"{existing['notes']}, {notes}"
-                        else:
-                            existing["notes"] = notes
-                # If different quantities, combine them (e.g., "1 + 1" or just add second amount)
-                elif qty and existing["quantity"]:
-                    # Try to add numeric quantities
-                    try:
-                        existing_num = float(existing["quantity"].replace(",", "."))
-                        new_num = float(qty.replace(",", "."))
-                        if existing["unit"] == unit:
-                            # Same unit, sum them up
-                            total = existing_num + new_num
-                            existing["quantity"] = str(int(total) if total == int(total) else total)
-                            if notes and notes not in existing["notes"]:
-                                if existing["notes"]:
-                                    existing["notes"] = f"{existing['notes']}, {notes}"
-                                else:
-                                    existing["notes"] = notes
-                        else:
-                            # Different units, keep both as separate entries
-                            clean.append({"food": food, "quantity": qty, "unit": unit, "notes": notes, "raw": raw_line})
-                    except ValueError:
-                        # Non-numeric quantities, keep as separate entries
-                        clean.append({"food": food, "quantity": qty, "unit": unit, "notes": notes, "raw": raw_line})
-                else:
-                    # One or both have no quantity, keep both
-                    clean.append({"food": food, "quantity": qty, "unit": unit, "notes": notes, "raw": raw_line})
-            else:
-                seen_foods[food_key] = len(clean)
-                clean.append({"food": food, "quantity": qty, "unit": unit, "notes": notes, "raw": raw_line})
-
-        # Store structured ingredients
-        data["recipeIngredients"] = clean
-        logger.info(f"[Chef] Processed {len(clean)} ingredients")
-        normalize_ingredient_units(clean)
-
-        # Create Schema.org recipeIngredient (flattened strings) for compatibility
-        flattened = []
-        for i in clean:
-            parts = [i["quantity"], i["unit"], i["food"], i.get("notes", "")]
-            line = " ".join(p for p in parts if p).strip().replace("–", "-")
-            if line:
-                flattened.append(line)
-        data["recipeIngredient"] = flattened
-
-        steps = data.get("recipeInstructions") or []
-        clean_steps = []
-        for step in steps:
-            if isinstance(step, dict):
-                text = str(step.get("text", "")).strip()
-            else:
-                text = str(step).strip()
-            if text:
-                clean_steps.append({"@type": "HowToStep", "text": text})
-        data["recipeInstructions"] = clean_steps
-
-        if not str(data.get("recipeYield") or "").strip():
-            data.pop("recipeYield", None)
-
-        return data
+        return postprocess_recipe(data, source_url or self.source_url)
 
     def create_recipe(self, *, source_url: str | None = None, max_retries: int = 3) -> dict:
         logger.info("[AI Recipe] Starting recipe creation from transcription...")
-        payload = {
-            "source_url": source_url,
-            "description": self.description,
-            "transcript": self.transcription,
-        }
+        payload = build_recipe_user_payload(
+            source_url=source_url or self.source_url,
+            description=self.description,
+            audio_transcript=self.transcription,
+            visual_text=self.visual_text,
+        )
 
         extraction = self._extract_recipe(
             get_recipe_system_prompt(),
@@ -291,15 +365,30 @@ class Chef:
     ) -> RecipeExtraction:
         last_error: BaseException | None = None
         response_text = ""
+        original_content = user_content
         for attempt in range(max_retries):
             try:
                 logger.info(
                     f"[AI Recipe] Calling LLM to generate recipe "
                     f"(attempt {attempt + 1}/{max_retries})..."
                 )
+                attempt_content = original_content
+                if last_error is not None:
+                    try:
+                        payload = json.loads(original_content)
+                    except json.JSONDecodeError:
+                        payload = {"original": original_content}
+                    if not isinstance(payload, dict):
+                        payload = {"original": original_content}
+                    payload["previous_attempt_error"] = str(last_error)
+                    payload["correction_hint"] = (
+                        "Fix the JSON, schema, or language issue in previous_attempt_error. "
+                        "Do not invent quantities to make the recipe look complete."
+                    )
+                    attempt_content = json.dumps(payload, ensure_ascii=False)
                 response_text = self._call_llm(
                     system_prompt,
-                    user_content,
+                    attempt_content,
                     schema_name="recipe",
                     json_schema=RECIPE_JSON_SCHEMA,
                     schema_model=RecipeExtraction,
@@ -332,19 +421,18 @@ class Chef:
 
     def _enrich_yield_and_nutrition(self, recipe: dict) -> dict:
         need_yield = not str(recipe.get("recipeYield") or "").strip()
-        need_nutrition = not isinstance(recipe.get("nutrition"), dict)
         need_prep_time = not str(recipe.get("prepTime") or "").strip()
         need_cook_time = not str(recipe.get("cookTime") or "").strip()
         need_total_time = not str(recipe.get("totalTime") or "").strip()
 
-        if need_nutrition and recipe.get("recipeYield"):
-            looked = lookup_recipe_nutrition(recipe)
-            if looked:
-                recipe["nutrition"] = looked
-                need_nutrition = False
-                logger.info("[Chef] Nutrition from local/USDA table: %s", looked)
+        looked = lookup_recipe_nutrition(recipe)
+        if looked:
+            recipe["nutrition"] = looked
+            logger.info("[Chef] Nutrition from local/USDA table: %s", looked)
+        else:
+            recipe.pop("nutrition", None)
 
-        if not (need_yield or need_nutrition or need_prep_time or need_cook_time or need_total_time):
+        if not (need_yield or need_prep_time or need_cook_time or need_total_time):
             return recipe
 
         payload = {
@@ -353,7 +441,8 @@ class Chef:
             "instructions": [
                 (step.get("text") if isinstance(step, dict) else str(step))
                 for step in (recipe.get("recipeInstructions") or [])
-            ]
+            ],
+            "nutrition_rule": "Leave nutrition fields empty. Macros come from the ingredient table, not guesses.",
         }
 
         response_text = self._call_llm(
@@ -374,7 +463,7 @@ class Chef:
             recipe,
             estimate,
             need_yield=need_yield,
-            need_nutrition=need_nutrition,
+            need_nutrition=False,
             need_prep_time=need_prep_time,
             need_cook_time=need_cook_time,
             need_total_time=need_total_time,
@@ -385,13 +474,11 @@ class Chef:
             logger.info(f"Estimated cookTime: {recipe['cookTime']}")
         if recipe.get("totalTime"):
             logger.info(f"Estimated totalTime: {recipe['totalTime']}")
-        if recipe.get("nutrition"):
-            logger.info(f"[Chef] Added nutrition to recipe: {recipe['nutrition']}")
-        elif need_nutrition:
-            looked = lookup_recipe_nutrition(recipe)
-            if looked:
-                recipe["nutrition"] = looked
-                logger.info("[Chef] Nutrition from local/USDA table after yield: %s", looked)
-            else:
-                logger.warning("[Chef] Nutrition dict had no valid fields")
+
+        looked = lookup_recipe_nutrition(recipe)
+        if looked:
+            recipe["nutrition"] = looked
+            logger.info("[Chef] Nutrition from local/USDA table after yield: %s", looked)
+        else:
+            recipe.pop("nutrition", None)
         return recipe

@@ -1,0 +1,28 @@
+{
+  "id": "he-ocr-beats-audio",
+  "kind": "video",
+  "language": "he",
+  "assert_quantity": ["פסטה", "200"],
+  "packet": {
+    "source_url": "https://example.com/video/pasta-conflict",
+    "description": "",
+    "on_screen_text": "פסטה ברוטב עגבניות\n200 גרם פסטה\n400 גרם עגבניות",
+    "audio_transcript": "שימו חמש מאות גרם פסטה, בערך חצי קילו."
+  },
+  "expected": {
+    "is_recipe": true,
+    "rejection_reason": "",
+    "name": "פסטה ברוטב עגבניות ביתי",
+    "description": "פסטה פשוטה עם רוטב עגבניות לפי הכמויות שעל המסך.",
+    "datePublished": "2026-01-01",
+    "recipeYield": "2 מנות",
+    "recipeInstructions": [
+      {"text": "מרתיחים מים ושוברים פסטה לסיר."},
+      {"text": "מבשלים רוטב עגבניות וערבבים עם הפסטה."}
+    ],
+    "recipeIngredients": [
+      {"food": "פסטה", "quantity": "200", "unit": "גרם", "notes": "", "raw": "200 גרם פסטה"},
+      {"food": "עגבניות", "quantity": "400", "unit": "גרם", "notes": "", "raw": "400 גרם עגבניות"}
+    ]
+  }
+}

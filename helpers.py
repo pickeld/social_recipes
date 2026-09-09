@@ -212,6 +212,8 @@ Ingredients:
   - "unit" MUST be a measurement unit only (e.g., "g", "kg", "ml", "cup", "tbsp", "tsp", "piece").
   - Do NOT include modifiers or prep instructions in "food" or "unit" - put them in "notes".
   - Do NOT invent quantities. If missing/unclear → "quantity": "" and "unit": "".
+  - If on_screen_text and audio_transcript disagree, trust on_screen_text for ingredients and amounts.
+  - A quantity that appears in neither source MUST stay empty.
   - Preserve numeric ranges literally, e.g., "3-4".
   - Put prep words (e.g., קצוץ / chopped, melted, room temperature) into "notes".
   - "raw" should be the complete ingredient line for display purposes.
@@ -272,20 +274,17 @@ General rules:
 - Only output the JSON object (no explanations).
 - ALL TEXT MUST BE IN {target_lang}.
 - If the input already contains Schema.org data, preserve accurate numeric quantities — do not invent or alter them.
+- Never guess a missing amount to make the recipe look complete.
 """
 
 
 def get_yield_nutrition_prompt() -> str:
     target_lang = _get_target_lang()
-    return f"""You are a registered-dietitian-style assistant.
+    return f"""You are a culinary timing assistant.
 Given a recipe's ingredients and instructions, estimate:
 - servings (number of portions; if unclear, infer a reasonable integer based on ingredient amounts)
-- prepTime (time to prepare ingredients, in minutes)
-- cookTime (time to cook/bake, in minutes)
-- totalTime (total time from start to finish, in minutes)
-- per-serving nutrition (Schema.org NutritionInformation fields):
-  calories (kcal), proteinContent (g), fatContent (g), carbohydrateContent (g),
-  fiberContent (g), sugarContent (g), sodiumContent (mg), cholesterolContent (mg).
+- prepTime, cookTime, totalTime as ISO-8601 durations
+Leave every nutrition field as "". Do not guess macros; another step looks those up from ingredients.
 Assumptions must be realistic; if an item is truly unclear, leave it out.
 Return a single valid JSON object with:
 {{
@@ -296,19 +295,16 @@ Return a single valid JSON object with:
   "totalTime": "PT45M",
   "nutrition": {{
     "@type": "NutritionInformation",
-    "calories": "450 kcal",
-    "proteinContent": "20 g",
-    "fatContent": "18 g",
-    "carbohydrateContent": "55 g",
-    "fiberContent": "4 g",
-    "sugarContent": "3 g",
-    "sodiumContent": "680 mg",
-    "cholesterolContent": "70 mg"
+    "calories": "",
+    "proteinContent": "",
+    "fatContent": "",
+    "carbohydrateContent": "",
+    "fiberContent": "",
+    "sugarContent": "",
+    "sodiumContent": "",
+    "cholesterolContent": ""
   }}
 }}
 Time values must be in ISO 8601 duration format (e.g., "PT30M" for 30 minutes, "PT1H" for 1 hour, "PT1H30M" for 1 hour 30 minutes). Use "" if unknown.
-All nutrition values are per serving. Use "" for a field that cannot be estimated.
-Do not invent impossible numbers; keep them plausible (calories 0–5000 per serving, servings 1–50).
-Estimate times based on the complexity of the recipe and cooking methods described.
-Output recipeYield in {target_lang}.
+Servings 1–50 only. Output recipeYield in {target_lang}.
 """

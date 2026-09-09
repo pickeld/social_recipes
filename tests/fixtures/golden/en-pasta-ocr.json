@@ -1,0 +1,29 @@
+{
+  "id": "en-pasta-ocr",
+  "kind": "video",
+  "language": "en",
+  "expect_nutrition": true,
+  "packet": {
+    "source_url": "https://example.com/video/pasta",
+    "description": "Weeknight tomato pasta",
+    "on_screen_text": "Tomato pasta\n200 g pasta\n1 tbsp olive oil\n400 g tomatoes\nBoil pasta. Simmer sauce. Toss together.",
+    "audio_transcript": "A quick pasta for dinner tonight."
+  },
+  "expected": {
+    "is_recipe": true,
+    "rejection_reason": "",
+    "name": "Tomato pasta",
+    "description": "A simple weeknight pasta with tomatoes and olive oil.",
+    "datePublished": "2026-01-01",
+    "recipeYield": "2 servings",
+    "recipeInstructions": [
+      {"text": "Boil the pasta in salted water until al dente."},
+      {"text": "Simmer tomatoes with olive oil, then toss with the pasta."}
+    ],
+    "recipeIngredients": [
+      {"food": "pasta", "quantity": "200", "unit": "g", "notes": "", "raw": "200 g pasta"},
+      {"food": "olive oil", "quantity": "1", "unit": "tbsp", "notes": "", "raw": "1 tbsp olive oil"},
+      {"food": "tomatoes", "quantity": "400", "unit": "g", "notes": "", "raw": "400 g tomatoes"}
+    ]
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "id": "en-audio-no-qty",
+  "kind": "video",
+  "language": "en",
+  "expect_empty_quantities": true,
+  "packet": {
+    "source_url": "https://example.com/video/spoken-only",
+    "description": "",
+    "on_screen_text": "",
+    "audio_transcript": "Just add some flour and water and mix until it looks like dough. No amounts on screen."
+  },
+  "expected": {
+    "is_recipe": true,
+    "rejection_reason": "",
+    "name": "Simple flour and water dough",
+    "description": "A basic dough from flour and water with no measured amounts in the source.",
+    "datePublished": "2026-01-01",
+    "recipeYield": "",
+    "recipeInstructions": [
+      {"text": "Mix flour and water until a soft dough forms."}
+    ],
+    "recipeIngredients": [
+      {"food": "flour", "quantity": "", "unit": "", "notes": "", "raw": "flour"},
+      {"food": "water", "quantity": "", "unit": "", "notes": "", "raw": "water"}
+    ]
+  }
+}

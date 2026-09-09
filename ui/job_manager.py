@@ -563,11 +563,22 @@ class JobManager:
         return upload_id
 
     def confirm_approval(self, upload_id: str,
-                         selected_image_index: Optional[int] = None) -> dict:
+                         selected_image_index: Optional[int] = None,
+                         recipe: Optional[dict] = None) -> dict:
         """Approve a pending upload and schedule its upload phase."""
         upload = get_pending_upload(upload_id)
         if not upload or upload['status'] != 'pending':
             return {'ok': False, 'error': 'not found or already processed'}
+
+        if recipe is not None:
+            from chef import RecipeEditError, apply_confirmed_recipe
+            from database import update_pending_upload_recipe
+            try:
+                merged = apply_confirmed_recipe(upload['recipe_data'], recipe)
+            except RecipeEditError as exc:
+                return {'ok': False, 'error': str(exc), 'code': 'invalid_recipe'}
+            if not update_pending_upload_recipe(upload_id, merged):
+                return {'ok': False, 'error': 'not found or already processed'}
 
         from database import confirm_pending_upload as db_confirm
         if not db_confirm(upload_id, selected_image_index):

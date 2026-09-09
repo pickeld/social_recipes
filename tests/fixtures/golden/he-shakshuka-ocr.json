@@ -1,0 +1,31 @@
+{
+  "id": "he-shakshuka-ocr",
+  "kind": "video",
+  "language": "he",
+  "expect_nutrition": true,
+  "packet": {
+    "source_url": "https://example.com/video/shakshuka",
+    "description": "שקשוקה ביתית",
+    "on_screen_text": "שקשוקה\n4 ביצים\n400 גרם עגבניות\n1 בצל\n2 כפות שמן זית\nמטגנים בצל, מוסיפים עגבניות, שוברים ביצים.",
+    "audio_transcript": "היום נכין שקשוקה טעימה במחבת."
+  },
+  "expected": {
+    "is_recipe": true,
+    "rejection_reason": "",
+    "name": "שקשוקה ביתית עם עגבניות",
+    "description": "שקשוקה קלה במחבת עם ביצים ועגבניות בשלות.",
+    "datePublished": "2026-01-01",
+    "recipeYield": "4 מנות",
+    "recipeInstructions": [
+      {"text": "מטגנים את הבצל בשמן זית עד שהוא מתרכך."},
+      {"text": "מוסיפים עגבניות ומבשלים עד שהרוטב מתעבה."},
+      {"text": "שוברים ביצים לתוך הרוטב ומבשלים עד שהחלבון נקפה."}
+    ],
+    "recipeIngredients": [
+      {"food": "ביצה", "quantity": "4", "unit": "יחידות", "notes": "", "raw": "4 ביצים"},
+      {"food": "עגבניות", "quantity": "400", "unit": "גרם", "notes": "", "raw": "400 גרם עגבניות"},
+      {"food": "בצל", "quantity": "1", "unit": "יחידה", "notes": "", "raw": "1 בצל"},
+      {"food": "שמן זית", "quantity": "2", "unit": "כפות", "notes": "", "raw": "2 כפות שמן זית"}
+    ]
+  }
+}

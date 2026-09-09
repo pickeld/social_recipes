@@ -9,6 +9,7 @@ import {
   CloudUploadIcon,
   XIcon,
   AlertCircleIcon,
+  RotateCcwIcon,
 } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardAction } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -129,10 +130,11 @@ function StageTracker({ currentStage, status }: StageTrackerProps) {
 interface JobCardProps {
   job: Job
   onCancel?: (id: string) => void
+  onRetry?: (job: Job) => void
   href?: string
 }
 
-export function JobCard({ job, onCancel, href }: JobCardProps) {
+export function JobCard({ job, onCancel, onRetry, href }: JobCardProps) {
   const title = job.video_title ?? truncateUrl(job.url)
   const cancellable = isCancellable(job.status)
 
@@ -201,10 +203,25 @@ export function JobCard({ job, onCancel, href }: JobCardProps) {
           </div>
         </div>
 
-        {job.status === 'failed' && job.error_message && (
-          <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-            <AlertCircleIcon className="mt-0.5 size-3.5 shrink-0" />
-            <span>{job.error_message}</span>
+        {job.status === 'failed' && (
+          <div className="space-y-2">
+            {job.error_message && (
+              <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                <AlertCircleIcon className="mt-0.5 size-3.5 shrink-0" />
+                <span>{job.error_message}</span>
+              </div>
+            )}
+            {onRetry && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => onRetry(job)}
+              >
+                <RotateCcwIcon />
+                Retry
+              </Button>
+            )}
           </div>
         )}
       </CardContent>

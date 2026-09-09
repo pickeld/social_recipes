@@ -2190,9 +2190,12 @@ def confirm_pending_upload_api(upload_id):
         return jsonify({'error': 'Pending upload not found or already processed'}), 404
 
     jm = get_job_manager()
-    result = jm.confirm_approval(upload_id, selected_image_index)
+    result = jm.confirm_approval(
+        upload_id, selected_image_index, recipe=data.get('recipe'),
+    )
     if not result.get('ok'):
-        return jsonify({'error': result.get('error', 'Already processed')}), 404
+        status = 400 if result.get('code') == 'invalid_recipe' else 404
+        return jsonify({'error': result.get('error', 'Already processed')}), status
     return jsonify({'status': 'confirmed', 'upload_id': upload_id,
                     'job_id': result.get('job_id')})
 
@@ -2444,7 +2447,11 @@ def handle_confirm_upload(data):
     if not upload:
         emit('error', {'message': 'Pending upload not found'})
         return
-    get_job_manager().confirm_approval(upload_id, selected_image_index)
+    result = get_job_manager().confirm_approval(
+        upload_id, selected_image_index, recipe=data.get('recipe'),
+    )
+    if not result.get('ok'):
+        emit('error', {'message': result.get('error', 'Pending upload not found')})
 
 
 @socketio.on('cancel_upload')

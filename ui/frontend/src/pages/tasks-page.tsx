@@ -29,6 +29,7 @@ import type {
   CandidateImage,
   BulkAction,
   HistoryEntry,
+  RecipeData,
 } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -40,6 +41,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
 import {
@@ -63,6 +65,7 @@ import {
   DropdownMenuSubContent,
 } from '@/components/ui/dropdown-menu'
 import { RecipeView } from '@/components/recipe-view'
+import { RecipeEditForm } from '@/components/recipe-edit-form'
 import { ImagePicker } from '@/components/image-picker'
 import { cn } from '@/lib/utils'
 
@@ -509,13 +512,113 @@ function RecipeModal({ historyId, onClose, onDelete }: RecipeModalProps) {
   )
 }
 
+interface ApprovalReviewDialogProps {
+  uploadId: string | null
+  initialImageIndex: number
+  onClose: () => void
+  onConfirmed: () => void
+}
+
+function ApprovalReviewDialog({
+  uploadId,
+  initialImageIndex,
+  onClose,
+  onConfirmed,
+}: ApprovalReviewDialogProps) {
+  const { data, isLoading } = useQuery<PendingUpload>({
+    queryKey: ['pending-upload', uploadId],
+    queryFn: () => api.getPendingUpload(uploadId!),
+    enabled: uploadId !== null,
+  })
+  const [selectedIndex, setSelectedIndex] = useState(initialImageIndex)
+  const [recipe, setRecipe] = useState<RecipeData | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    setSelectedIndex(initialImageIndex)
+    setRecipe(null)
+  }, [uploadId, initialImageIndex])
+
+  useEffect(() => {
+    if (data?.recipe && recipe === null) {
+      setRecipe(structuredClone(data.recipe))
+    }
+  }, [data, recipe])
+
+  const candidates: CandidateImage[] = useMemo(() => {
+    if (!data) return []
+    const list = (data.candidate_images || []).filter((c) => c.data)
+    if (!list.length && data.image_data) {
+      return [{ index: 0, data: data.image_data, path: '', is_best: true }]
+    }
+    return list
+  }, [data])
+
+  const handleConfirm = useCallback(async () => {
+    if (!uploadId || !recipe) return
+    setSaving(true)
+    try {
+      await api.confirmPendingUpload(uploadId, {
+        selected_image_index: selectedIndex,
+        recipe,
+      })
+      toast.success('Approved — uploading…')
+      onConfirmed()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Approve failed')
+    } finally {
+      setSaving(false)
+    }
+  }, [uploadId, recipe, selectedIndex, onConfirmed])
+
+  return (
+    <Dialog open={uploadId !== null} onOpenChange={(open) => { if (!open) onClose() }}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Review recipe</DialogTitle>
+          <DialogDescription>
+            Edit the recipe, then confirm to upload
+            {data?.output_target ? ` to ${data.output_target}` : ''}.
+          </DialogDescription>
+        </DialogHeader>
+        {isLoading && (
+          <div className="space-y-3 py-2">
+            <Skeleton className="h-24 w-full rounded-lg" />
+            <Skeleton className="h-4 w-3/4" />
+          </div>
+        )}
+        {!isLoading && recipe && (
+          <div className="space-y-4">
+            {candidates.length > 0 && (
+              <ImagePicker
+                images={candidates}
+                value={selectedIndex}
+                onChange={setSelectedIndex}
+              />
+            )}
+            <RecipeEditForm recipe={recipe} onChange={setRecipe} />
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={() => void handleConfirm()} disabled={saving || !recipe}>
+            Confirm upload
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 // ===== Task row =====
 
 interface TaskRowProps {
   row: TaskRow
   selected: boolean
   onSelect: (key: string, checked: boolean) => void
-  onApprove: (uploadId: string, imageIndex: number) => void
+  onReview: (uploadId: string, imageIndex: number) => void
   onReject: (uploadId: string) => void
   onRetry: (url: string, historyId: number) => void
   onCancelJob: (jobId: string) => void
@@ -529,7 +632,7 @@ function TaskRowItem({
   row,
   selected,
   onSelect,
-  onApprove,
+  onReview,
   onReject,
   onRetry,
   onCancelJob,
@@ -632,7 +735,7 @@ function TaskRowItem({
         {isApproval && row.pendingUploadId && (
           <Button
             size="sm"
-            onClick={() => onApprove(row.pendingUploadId!, selectedImageIndex)}
+            onClick={() => onReview(row.pendingUploadId!, selectedImageIndex)}
           >
             <CheckIcon />
             Approve
@@ -805,6 +908,10 @@ export function TasksPage() {
   const [showBulkDelete, setShowBulkDelete] = useState(false)
   const [recipeModalId, setRecipeModalId] = useState<number | null>(null)
   const [deleteAfterCloseId, setDeleteAfterCloseId] = useState<number | null>(null)
+  const [reviewState, setReviewState] = useState<{
+    uploadId: string
+    imageIndex: number
+  } | null>(null)
 
   const scope = session?.is_admin ? 'all' : 'mine'
 
@@ -899,15 +1006,9 @@ export function TasksPage() {
     (r) => !TERMINAL_STATUSES.has(r.status) && r.bucket !== 'approval',
   )
 
-  const handleApprove = useCallback(async (uploadId: string, imageIndex: number) => {
-    try {
-      await api.confirmPendingUpload(uploadId, imageIndex)
-      toast.success('Approved — uploading…')
-      invalidate()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Approve failed')
-    }
-  }, [invalidate])
+  const handleReview = useCallback((uploadId: string, imageIndex: number) => {
+    setReviewState({ uploadId, imageIndex })
+  }, [])
 
   const handleReject = useCallback(async (uploadId: string) => {
     try {
@@ -1149,7 +1250,7 @@ export function TasksPage() {
                 row={row}
                 selected={selected.has(row.key)}
                 onSelect={handleSelect}
-                onApprove={handleApprove}
+                onReview={handleReview}
                 onReject={handleReject}
                 onRetry={handleRetry}
                 onCancelJob={handleCancelJob}
@@ -1167,6 +1268,16 @@ export function TasksPage() {
         historyId={recipeModalId}
         onClose={() => setRecipeModalId(null)}
         onDelete={handleRecipeDelete}
+      />
+
+      <ApprovalReviewDialog
+        uploadId={reviewState?.uploadId ?? null}
+        initialImageIndex={reviewState?.imageIndex ?? 0}
+        onClose={() => setReviewState(null)}
+        onConfirmed={() => {
+          setReviewState(null)
+          invalidate()
+        }}
       />
 
       <DeleteRowDialog

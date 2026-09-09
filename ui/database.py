@@ -1409,6 +1409,22 @@ def get_pending_uploads(*, user_id: Optional[str] = None,
         return results
 
 
+def update_pending_upload_recipe(upload_id: str, recipe_data: Dict) -> bool:
+    """Replace recipe JSON for a still-pending confirmation."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            '''
+            UPDATE pending_uploads
+            SET recipe_data = ?
+            WHERE id = ? AND status = 'pending'
+            ''',
+            (json.dumps(recipe_data), upload_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+
 def confirm_pending_upload(upload_id: str, selected_image_index: Optional[int] = None) -> bool:
     """Mark a pending upload as confirmed."""
     with get_db() as conn:

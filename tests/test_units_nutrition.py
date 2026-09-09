@@ -42,6 +42,25 @@ class NutritionLookupTests(unittest.TestCase):
         self.assertEqual(match_food("פסטה"), "pasta")
         self.assertEqual(match_food("olive oil"), "olive oil")
 
+    def test_longest_alias_wins_over_short_substring(self):
+        self.assertEqual(match_food("extra virgin olive oil"), "olive oil")
+        self.assertEqual(match_food("tomato paste"), "tomato paste")
+        self.assertNotEqual(match_food("tomato paste"), "tomato")
+        self.assertEqual(match_food("grilled chicken breast"), "chicken breast")
+
+    def test_partial_match_returns_table_macros(self):
+        recipe = {
+            "recipeYield": "1 serving",
+            "recipeIngredients": [
+                {"food": "pasta", "quantity": "100", "unit": "g", "notes": "", "raw": ""},
+                {"food": "mystery spice blend", "quantity": "1", "unit": "tsp", "notes": "", "raw": ""},
+            ],
+        }
+        nutrition = lookup_recipe_nutrition(recipe)
+        self.assertIsNotNone(nutrition)
+        kcal = float(str(nutrition["calories"]).split()[0])
+        self.assertGreater(kcal, 50)
+
     def test_estimates_per_serving_from_local_table(self):
         recipe = {
             "recipeYield": "2 servings",

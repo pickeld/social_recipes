@@ -35,6 +35,7 @@ export function JobPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [cancelling, setCancelling] = useState(false)
+  const [retrying, setRetrying] = useState(false)
 
   const queryKey = ['job', jobId]
 
@@ -134,6 +135,20 @@ export function JobPage() {
     }
   }, [jobId, invalidate])
 
+  const handleRetry = useCallback(async () => {
+    if (!job) return
+    setRetrying(true)
+    try {
+      const data = await api.retryJob({ url: job.url })
+      toast.success('Retry started')
+      navigate(`/jobs/${data.job_id}`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Retry failed')
+    } finally {
+      setRetrying(false)
+    }
+  }, [job, navigate])
+
   const is404 =
     isError &&
     error instanceof Error &&
@@ -204,6 +219,13 @@ export function JobPage() {
                   : () => {
                       document.getElementById('cancel-trigger')?.click()
                     }
+              }
+              onRetry={
+                job.status === 'failed' && !retrying
+                  ? () => {
+                      void handleRetry()
+                    }
+                  : undefined
               }
             />
             <AlertDialogTrigger id="cancel-trigger" className="sr-only" />

@@ -1,0 +1,31 @@
+{
+  "id": "web-en-schema",
+  "kind": "web",
+  "language": "en",
+  "expect_nutrition": true,
+  "packet": {
+    "source_url": "https://example.com/recipes/lentil-soup",
+    "structured_recipe": {
+      "name": "Lentil soup",
+      "recipeIngredient": ["200 g lentils", "1 onion", "1 tbsp olive oil"]
+    },
+    "page_text": "Lentil soup. Saute onion in olive oil. Add lentils and water. Simmer until tender."
+  },
+  "expected": {
+    "is_recipe": true,
+    "rejection_reason": "",
+    "name": "Lentil soup",
+    "description": "A simple soup of lentils simmered with onion and olive oil.",
+    "datePublished": "2026-01-01",
+    "recipeYield": "4 servings",
+    "recipeInstructions": [
+      {"text": "Saute the onion in olive oil until soft."},
+      {"text": "Add lentils and water, then simmer until tender."}
+    ],
+    "recipeIngredients": [
+      {"food": "lentils", "quantity": "200", "unit": "g", "notes": "", "raw": "200 g lentils"},
+      {"food": "onion", "quantity": "1", "unit": "", "notes": "", "raw": "1 onion"},
+      {"food": "olive oil", "quantity": "1", "unit": "tbsp", "notes": "", "raw": "1 tbsp olive oil"}
+    ]
+  }
+}

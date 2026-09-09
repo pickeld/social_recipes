@@ -224,17 +224,41 @@ def _fold_food(name: str) -> str:
     return " ".join((name or "").casefold().split())
 
 
+def _alias_is_token(text: str, alias: str) -> bool:
+    """True when ``alias`` appears in ``text`` with non-letter boundaries."""
+    start = 0
+    while True:
+        idx = text.find(alias, start)
+        if idx < 0:
+            return False
+        before = text[idx - 1] if idx > 0 else " "
+        after_idx = idx + len(alias)
+        after = text[after_idx] if after_idx < len(text) else " "
+        if not before.isalpha() and not after.isalpha():
+            return True
+        start = idx + 1
+
+
 def match_food(name: str) -> str | None:
-    """Return the canonical food key for an ingredient name, if any."""
+    """Return the canonical food key for an ingredient name, if any.
+
+    Exact alias wins, then the longest token-bounded alias so ``oil`` cannot
+    beat ``olive oil``.
+    """
     folded = _fold_food(name)
     if not folded:
         return None
     if folded in _ALIAS_TO_CANON:
         return _ALIAS_TO_CANON[folded]
+    best_alias = ""
+    best_canon: str | None = None
     for alias, canon in _ALIAS_TO_CANON.items():
-        if alias and alias in folded:
-            return canon
-    return None
+        if not alias or alias not in folded or len(alias) < len(best_alias):
+            continue
+        if _alias_is_token(folded, alias):
+            best_alias = alias
+            best_canon = canon
+    return best_canon
 
 
 def _scale(n: _N, grams: float) -> _N:
@@ -347,12 +371,6 @@ def lookup_recipe_nutrition(recipe: dict) -> dict | None:
 
     usable = sum(1 for i in ingredients if isinstance(i, dict) and str(i.get("food") or "").strip())
     if matched == 0 or weighed <= 0:
-        return None
-    if usable and matched / usable < 0.5:
-        logger.info(
-            "[Nutrition] local/USDA match rate %.0f%% — leaving nutrition to the LLM",
-            100 * matched / usable,
-        )
         return None
 
     servings = max(extract_servings(recipe), 1)
