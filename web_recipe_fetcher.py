@@ -16,6 +16,7 @@ from typing import Any
 from urllib.parse import urljoin, urlparse
 
 from helpers import create_http_session, setup_logger
+from url_safety import safe_get
 
 logger = setup_logger(__name__)
 
@@ -69,7 +70,7 @@ def fetch_web_recipe(url: str) -> dict:
     session = create_http_session()
     logger.info(f"[WebRecipeFetcher] Fetching {url}")
 
-    resp = session.get(url, headers=_BROWSER_HEADERS, timeout=20)
+    resp = safe_get(session, url, headers=_BROWSER_HEADERS, timeout=20)
     resp.raise_for_status()
 
     content_type = resp.headers.get("content-type", "")
@@ -110,7 +111,9 @@ def download_image(image_url: str, dest_dir: str) -> str | None:
         return None
     try:
         session = create_http_session()
-        resp = session.get(image_url, headers=_BROWSER_HEADERS, timeout=15, stream=True)
+        resp = safe_get(
+            session, image_url, headers=_BROWSER_HEADERS, timeout=15, stream=True
+        )
         resp.raise_for_status()
         ext = _guess_image_ext(resp.headers.get("content-type", ""), image_url)
         os.makedirs(dest_dir, exist_ok=True)

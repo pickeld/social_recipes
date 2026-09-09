@@ -181,18 +181,22 @@ def _get_target_lang() -> str:
 def get_recipe_system_prompt() -> str:
     target_lang = _get_target_lang()
     return f"""You are a culinary data normalizer.
-Return a single valid JSON object in Schema.org JSON-LD for a Recipe.
+Return a single valid JSON object.
 MUST be strictly valid JSON (no comments, no trailing commas).
 ALL text content MUST be in {target_lang}. Translate any content that is not already in {target_lang}.
 
+If the input is not a recipe (no dish, no ingredients, no cooking steps — e.g. a vlog, ad, music video, or unrelated clip), set "is_recipe" to false, put a short reason in "rejection_reason", and leave the recipe fields empty. Do NOT invent a recipe.
+
+If it is a recipe, set "is_recipe" to true and "rejection_reason" to "".
+
 Required fields:
-- "@context": "https://schema.org"
-- "@type": "Recipe"
+- "is_recipe" (boolean)
+- "rejection_reason" (string; empty when is_recipe is true)
 - "name"
 - "description" (1–2 short sentences)
 - "datePublished" (ISO 8601)
-- "recipeYield" (string)
-- "recipeInstructions" (array of HowToStep objects: {{ "@type": "HowToStep", "text": "<step>" }})
+- "recipeYield" (string; empty if unknown)
+- "recipeInstructions" (array of objects: {{ "text": "<step>" }})
 
 Ingredients:
 - "recipeIngredients" (array of objects). Each item MUST be:
@@ -214,7 +218,7 @@ Ingredients:
   - Merge true duplicates (identical food+quantity+unit+notes).
 
 General rules:
-- Keep instructions chronological; one step per HowToStep.
+- Keep instructions chronological; one step per object.
 - Only output the JSON object (no explanations).
 - ALL TEXT MUST BE IN {target_lang}.
 """
@@ -227,18 +231,22 @@ You will receive either:
   (a) a Schema.org Recipe JSON object already extracted from the page, or
   (b) raw visible text scraped from a recipe web page.
 
-Return a single valid JSON object in Schema.org JSON-LD for a Recipe.
+Return a single valid JSON object.
 MUST be strictly valid JSON (no comments, no trailing commas).
 ALL text content MUST be in {target_lang}. Translate any content that is not already in {target_lang}.
 
+If the input is not a recipe (no dish, no ingredients, no cooking steps — e.g. a homepage, blog post, or shop page), set "is_recipe" to false, put a short reason in "rejection_reason", and leave the recipe fields empty. Do NOT invent a recipe.
+
+If it is a recipe, set "is_recipe" to true and "rejection_reason" to "".
+
 Required fields:
-- "@context": "https://schema.org"
-- "@type": "Recipe"
+- "is_recipe" (boolean)
+- "rejection_reason" (string; empty when is_recipe is true)
 - "name"
 - "description" (1–2 short sentences)
 - "datePublished" (ISO 8601)
-- "recipeYield" (string)
-- "recipeInstructions" (array of HowToStep objects: {{ "@type": "HowToStep", "text": "<step>" }})
+- "recipeYield" (string; empty if unknown)
+- "recipeInstructions" (array of objects: {{ "text": "<step>" }})
 
 Ingredients:
 - "recipeIngredients" (array of objects). Each item MUST be:
@@ -260,7 +268,7 @@ Ingredients:
   - Merge true duplicates (identical food+quantity+unit+notes).
 
 General rules:
-- Keep instructions chronological; one step per HowToStep.
+- Keep instructions chronological; one step per object.
 - Only output the JSON object (no explanations).
 - ALL TEXT MUST BE IN {target_lang}.
 - If the input already contains Schema.org data, preserve accurate numeric quantities — do not invent or alter them.
@@ -298,9 +306,9 @@ Return a single valid JSON object with:
     "cholesterolContent": "70 mg"
   }}
 }}
-Time values must be in ISO 8601 duration format (e.g., "PT30M" for 30 minutes, "PT1H" for 1 hour, "PT1H30M" for 1 hour 30 minutes).
-All nutrition values are per serving.
-Do not invent impossible numbers; keep them plausible.
+Time values must be in ISO 8601 duration format (e.g., "PT30M" for 30 minutes, "PT1H" for 1 hour, "PT1H30M" for 1 hour 30 minutes). Use "" if unknown.
+All nutrition values are per serving. Use "" for a field that cannot be estimated.
+Do not invent impossible numbers; keep them plausible (calories 0–5000 per serving, servings 1–50).
 Estimate times based on the complexity of the recipe and cooking methods described.
 Output recipeYield in {target_lang}.
 """

@@ -1,29 +1,26 @@
 import json
 from datetime import datetime, timezone
+from typing import Any
 
 from config import config
 from helpers import get_recipe_system_prompt, get_web_recipe_system_prompt, get_yield_nutrition_prompt, setup_logger
 from llm_resilience import call_with_model_fallback
+from recipe_schema import (
+    NUTRITION_JSON_SCHEMA,
+    RECIPE_JSON_SCHEMA,
+    NotARecipeError,
+    RecipeExtraction,
+    ValidationError,
+    YieldNutritionEstimate,
+    apply_yield_nutrition_guardrails,
+    ensure_is_recipe,
+    extract_json,
+    parse_recipe_extraction,
+    parse_yield_nutrition,
+    recipe_dict_from_extraction,
+)
 
 logger = setup_logger(__name__)
-
-
-def _extract_json(text: str) -> str:
-    """Extract JSON from text, stripping markdown code blocks if present."""
-    if not text:
-        return text
-    text = text.strip()
-    # Remove markdown code blocks (```json ... ``` or ``` ... ```)
-    if text.startswith("```"):
-        # Find the end of the first line (language specifier)
-        first_newline = text.find("\n")
-        if first_newline != -1:
-            text = text[first_newline + 1:]
-        # Remove trailing ```
-        if text.endswith("```"):
-            text = text[:-3]
-        text = text.strip()
-    return text
 
 
 class Chef:
@@ -34,7 +31,7 @@ class Chef:
         if self.provider == "openai":
             from openai import OpenAI
             logger.info("[AI Recipe] Using OpenAI LLM provider")
-            self.client = OpenAI(api_key=config.OPENAI_API_KEY)
+            self.client = OpenAI(api_key=config.OPENAI_API_KEY or "not-configured")
             self.model = model or config.OPENAI_MODEL
             logger.info(f"[AI Recipe] OpenAI model: {self.model}")
         elif self.provider == "gemini":
@@ -50,32 +47,60 @@ class Chef:
         self.transcription = transcription
         logger.info(f"[AI Recipe] Chef initialized. Transcription length: {len(transcription)} chars")
 
-    def _call_llm(self, system_prompt: str, user_content: str) -> str:
+    def _call_llm(
+        self,
+        system_prompt: str,
+        user_content: str,
+        *,
+        schema_name: str | None = None,
+        json_schema: dict[str, Any] | None = None,
+        schema_model: type | None = None,
+    ) -> str:
         """Call the LLM and return the response text, abstracting provider differences.
 
         Wrapped with a model-fallback chain so a retired/deprecated model (404)
         transparently fails over to a known-good model instead of taking the
         whole extraction down (see PIC-34).
+
+        When ``json_schema`` / ``schema_model`` are provided the provider is
+        asked for structured JSON so we do not have to scrape markdown fences.
         """
         def _openai(model: str) -> str:
-            resp = self.client.responses.create(
-                model=model,
-                input=[
+            kwargs: dict[str, Any] = {
+                "model": model,
+                "input": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_content},
                 ],
-            )
+            }
+            if json_schema is not None and schema_name:
+                kwargs["text"] = {
+                    "format": {
+                        "type": "json_schema",
+                        "name": schema_name,
+                        "strict": True,
+                        "schema": json_schema,
+                    }
+                }
+            resp = self.client.responses.create(**kwargs)
             return resp.output_text
 
         def _gemini(model: str) -> str:
-            resp = self.client.models.generate_content(
-                model=model,
-                contents=f"{system_prompt}\n\n{user_content}"
-            )
+            from google.genai import types
+
+            kwargs: dict[str, Any] = {
+                "model": model,
+                "contents": f"{system_prompt}\n\n{user_content}",
+            }
+            if schema_model is not None:
+                kwargs["config"] = types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=schema_model,
+                )
+            resp = self.client.models.generate_content(**kwargs)
             raw_text = resp.text or ""
             logger.debug(f"Gemini raw response: {raw_text[:500]}...")
-            # Extract JSON from markdown code blocks if present
-            return _extract_json(raw_text)
+            return extract_json(raw_text)
 
         if self.provider == "openai":
             call = _openai
@@ -173,6 +198,20 @@ class Chef:
                 flattened.append(line)
         data["recipeIngredient"] = flattened
 
+        steps = data.get("recipeInstructions") or []
+        clean_steps = []
+        for step in steps:
+            if isinstance(step, dict):
+                text = str(step.get("text", "")).strip()
+            else:
+                text = str(step).strip()
+            if text:
+                clean_steps.append({"@type": "HowToStep", "text": text})
+        data["recipeInstructions"] = clean_steps
+
+        if not str(data.get("recipeYield") or "").strip():
+            data.pop("recipeYield", None)
+
         return data
 
     def create_recipe(self, *, source_url: str | None = None, max_retries: int = 3) -> dict:
@@ -183,33 +222,22 @@ class Chef:
             "transcript": self.transcription,
         }
 
-        last_error = None
-        for attempt in range(max_retries):
-            try:
-                logger.info(f"[AI Recipe] Calling LLM to generate recipe (attempt {attempt + 1}/{max_retries})...")
-                response_text = self._call_llm(
-                    get_recipe_system_prompt(),
-                    json.dumps(payload, ensure_ascii=False)
-                )
-                logger.info(f"[AI Recipe] LLM response received ({len(response_text)} chars)")
-                data = json.loads(response_text)
-                logger.info(f"[AI Recipe] Recipe parsed. Name: {data.get('name', 'Unknown')}")
-                recipe = self._postprocess_recipe(data, source_url)
-                logger.info(f"[AI Recipe] Recipe postprocessed. Ingredients: {len(recipe.get('recipeIngredient', []))}, Steps: {len(recipe.get('recipeInstructions', []))}")
-                recipe = self._enrich_yield_and_nutrition(recipe)
-                logger.info("[AI Recipe] Recipe creation complete.")
-                return recipe
-            except json.JSONDecodeError as e:
-                last_error = e
-                logger.warning(f"[AI Recipe] JSON parsing failed (attempt {attempt + 1}/{max_retries}): {e}")
-                logger.debug(f"[AI Recipe] Raw response: {response_text[:500]}...")
-                if attempt < max_retries - 1:
-                    continue
-        
-        raise RuntimeError(
-            f"Failed to parse LLM response as JSON after {max_retries} attempts. "
-            f"Last error: {last_error}"
+        extraction = self._extract_recipe(
+            get_recipe_system_prompt(),
+            json.dumps(payload, ensure_ascii=False),
+            max_retries=max_retries,
         )
+        recipe = self._postprocess_recipe(
+            recipe_dict_from_extraction(extraction), source_url
+        )
+        logger.info(
+            f"[AI Recipe] Recipe postprocessed. Ingredients: "
+            f"{len(recipe.get('recipeIngredient', []))}, "
+            f"Steps: {len(recipe.get('recipeInstructions', []))}"
+        )
+        recipe = self._enrich_yield_and_nutrition(recipe)
+        logger.info("[AI Recipe] Recipe creation complete.")
+        return recipe
 
     def create_recipe_from_web_content(
         self,
@@ -237,53 +265,76 @@ class Chef:
         if page_text:
             payload["page_text"] = page_text
 
-        last_error = None
+        extraction = self._extract_recipe(
+            get_web_recipe_system_prompt(),
+            json.dumps(payload, ensure_ascii=False),
+            max_retries=max_retries,
+        )
+        recipe = self._postprocess_recipe(
+            recipe_dict_from_extraction(extraction), source_url
+        )
+        logger.info(
+            f"[AI Recipe] Recipe postprocessed. "
+            f"Ingredients: {len(recipe.get('recipeIngredient', []))}, "
+            f"Steps: {len(recipe.get('recipeInstructions', []))}"
+        )
+        recipe = self._enrich_yield_and_nutrition(recipe)
+        logger.info("[AI Recipe] Web recipe creation complete.")
+        return recipe
+
+    def _extract_recipe(
+        self, system_prompt: str, user_content: str, *, max_retries: int
+    ) -> RecipeExtraction:
+        last_error: BaseException | None = None
+        response_text = ""
         for attempt in range(max_retries):
             try:
                 logger.info(
-                    f"[AI Recipe] Calling LLM to normalise web recipe "
+                    f"[AI Recipe] Calling LLM to generate recipe "
                     f"(attempt {attempt + 1}/{max_retries})..."
                 )
                 response_text = self._call_llm(
-                    get_web_recipe_system_prompt(),
-                    json.dumps(payload, ensure_ascii=False),
+                    system_prompt,
+                    user_content,
+                    schema_name="recipe",
+                    json_schema=RECIPE_JSON_SCHEMA,
+                    schema_model=RecipeExtraction,
                 )
-                logger.info(f"[AI Recipe] LLM response received ({len(response_text)} chars)")
-                data = json.loads(response_text)
-                logger.info(f"[AI Recipe] Recipe parsed. Name: {data.get('name', 'Unknown')}")
-                recipe = self._postprocess_recipe(data, source_url)
                 logger.info(
-                    f"[AI Recipe] Recipe postprocessed. "
-                    f"Ingredients: {len(recipe.get('recipeIngredient', []))}, "
-                    f"Steps: {len(recipe.get('recipeInstructions', []))}"
+                    f"[AI Recipe] LLM response received ({len(response_text)} chars)"
                 )
-                recipe = self._enrich_yield_and_nutrition(recipe)
-                logger.info("[AI Recipe] Web recipe creation complete.")
-                return recipe
-            except json.JSONDecodeError as e:
-                last_error = e
+                extraction = parse_recipe_extraction(response_text)
+                ensure_is_recipe(extraction)
+                logger.info(
+                    f"[AI Recipe] Recipe parsed. Name: {extraction.name or 'Unknown'}"
+                )
+                return extraction
+            except NotARecipeError:
+                raise
+            except (json.JSONDecodeError, ValidationError, ValueError) as exc:
+                last_error = exc
                 logger.warning(
-                    f"[AI Recipe] JSON parsing failed (attempt {attempt + 1}/{max_retries}): {e}"
+                    f"[AI Recipe] Recipe validation failed "
+                    f"(attempt {attempt + 1}/{max_retries}): {exc}"
                 )
+                logger.debug(f"[AI Recipe] Raw response: {response_text[:500]}...")
                 if attempt < max_retries - 1:
                     continue
-
         raise RuntimeError(
-            f"Failed to parse LLM response as JSON after {max_retries} attempts. "
+            f"Failed to parse LLM response as a recipe after {max_retries} attempts. "
             f"Last error: {last_error}"
         )
 
     def _enrich_yield_and_nutrition(self, recipe: dict) -> dict:
-        need_yield = "recipeYield" not in recipe
-        need_nutrition = "nutrition" not in recipe
-        need_prep_time = "prepTime" not in recipe
-        need_cook_time = "cookTime" not in recipe
-        need_total_time = "totalTime" not in recipe
+        need_yield = not str(recipe.get("recipeYield") or "").strip()
+        need_nutrition = not isinstance(recipe.get("nutrition"), dict)
+        need_prep_time = not str(recipe.get("prepTime") or "").strip()
+        need_cook_time = not str(recipe.get("cookTime") or "").strip()
+        need_total_time = not str(recipe.get("totalTime") or "").strip()
 
         if not (need_yield or need_nutrition or need_prep_time or need_cook_time or need_total_time):
-            return recipe  # Nothing to enrich
+            return recipe
 
-        # Prepare input for the LLM: ingredients list + instructions
         payload = {
             "language_hint": config.RECIPE_LANG,
             "ingredients": recipe.get("recipeIngredient", []),
@@ -295,56 +346,35 @@ class Chef:
 
         response_text = self._call_llm(
             get_yield_nutrition_prompt(),
-            json.dumps(payload, ensure_ascii=False)
+            json.dumps(payload, ensure_ascii=False),
+            schema_name="yield_nutrition",
+            json_schema=NUTRITION_JSON_SCHEMA,
+            schema_model=YieldNutritionEstimate,
         )
         try:
-            est = json.loads(response_text)
-        except json.JSONDecodeError as e:
+            estimate = parse_yield_nutrition(response_text)
+        except (json.JSONDecodeError, ValidationError, ValueError) as exc:
             raise RuntimeError(
-                f"Nutrition/servings/time estimation failed: {e}\nRaw:\n{response_text}")
+                f"Nutrition/servings/time estimation failed: {exc}\nRaw:\n{response_text}"
+            ) from exc
 
-        # Apply yield if needed
-        if need_yield:
-            ry = est.get("recipeYield")
-            servings = est.get("servings")
-            if not ry and isinstance(servings, int) and servings > 0:
-                ry = f"{servings} servings"
-            if ry:
-                recipe["recipeYield"] = str(ry)
-
-        # Apply time estimates if needed
-        if need_prep_time and est.get("prepTime"):
-            recipe["prepTime"] = str(est["prepTime"])
-            logger.info(f"Estimated prepTime: {est['prepTime']}")
-            
-        if need_cook_time and est.get("cookTime"):
-            recipe["cookTime"] = str(est["cookTime"])
-            logger.info(f"Estimated cookTime: {est['cookTime']}")
-            
-        if need_total_time and est.get("totalTime"):
-            recipe["totalTime"] = str(est["totalTime"])
-            logger.info(f"Estimated totalTime: {est['totalTime']}")
-
-        # Apply nutrition if needed
-        logger.info(f"[Chef] need_nutrition={need_nutrition}, est nutrition={est.get('nutrition')}")
-        if need_nutrition and isinstance(est.get("nutrition"), dict):
-            allowed = {
-                "@type", "calories", "proteinContent", "fatContent", "carbohydrateContent",
-                "fiberContent", "sugarContent", "sodiumContent", "cholesterolContent"
-            }
-            nutrition = {"@type": "NutritionInformation"}
-            for k, v in est["nutrition"].items():
-                if k in allowed and v:
-                    nutrition[k] = str(v)
-            # Add nutrition if we have at least one valid field
-            if any(k in nutrition for k in ("calories", "proteinContent", "fatContent",
-                                            "carbohydrateContent", "fiberContent",
-                                            "sugarContent", "sodiumContent", "cholesterolContent")):
-                recipe["nutrition"] = nutrition
-                logger.info(f"[Chef] Added nutrition to recipe: {nutrition}")
-            else:
-                logger.warning("[Chef] Nutrition dict had no valid fields")
-        else:
-            logger.warning(f"[Chef] Skipping nutrition: need_nutrition={need_nutrition}")
-
+        recipe = apply_yield_nutrition_guardrails(
+            recipe,
+            estimate,
+            need_yield=need_yield,
+            need_nutrition=need_nutrition,
+            need_prep_time=need_prep_time,
+            need_cook_time=need_cook_time,
+            need_total_time=need_total_time,
+        )
+        if recipe.get("prepTime"):
+            logger.info(f"Estimated prepTime: {recipe['prepTime']}")
+        if recipe.get("cookTime"):
+            logger.info(f"Estimated cookTime: {recipe['cookTime']}")
+        if recipe.get("totalTime"):
+            logger.info(f"Estimated totalTime: {recipe['totalTime']}")
+        if recipe.get("nutrition"):
+            logger.info(f"[Chef] Added nutrition to recipe: {recipe['nutrition']}")
+        elif need_nutrition:
+            logger.warning("[Chef] Nutrition dict had no valid fields")
         return recipe

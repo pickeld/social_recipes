@@ -1,6 +1,7 @@
 yt-dlp[curl-cffi]
 faster_whisper
 openai
+pydantic>=2
 python-dotenv
 requests
 flask
